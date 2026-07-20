@@ -68,7 +68,7 @@
     min-height:56px; border-radius:12px; border:1px solid var(--line); background:var(--panel);
     color:var(--text); font-weight:700; font-size:16px; padding:8px 6px;
     display:flex; align-items:center; justify-content:center; text-align:center;
-    line-height:1.15;
+    line-height:1.15; overflow-wrap:break-word; word-break:break-word; hyphens:auto;
   }
   .tile.small{ min-height:48px; font-size:14px; }
   .tile.wide{ min-height:64px; font-size:18px; }
@@ -148,10 +148,10 @@
 </div>
 
 <div class="tabs">
-  <button id="tab-tag" class="active" onclick="setTab('tag')">Tag</button>
+  <button id="tab-setup" class="active" onclick="setTab('setup')">Roster/Plays</button>
+  <button id="tab-tag" onclick="setTab('tag')">Tag</button>
   <button id="tab-tendencies" onclick="setTab('tendencies')">Tendencies</button>
   <button id="tab-boxscore" onclick="setTab('boxscore')">Box Score</button>
-  <button id="tab-setup" onclick="setTab('setup')">Roster/Plays</button>
   <button id="tab-export" onclick="setTab('export')">Export</button>
 </div>
 
@@ -161,7 +161,7 @@
 // ---------------- STATE ----------------
 const DEFAULT_FORMATIONS = ["Right","Left","Roger","Larry","Other"];
 const DEFAULT_DEF_FORMATIONS = ["King","Queen","Trips","Pro","Other"];
-const OFF_DEF_PLAY_TYPES = ["Run","Pass","RPO","Sack","Penalty"];
+const OFF_DEF_PLAY_TYPES = ["Run","Pass","Sack","Penalty"];
 const KICK_PLAY_TYPES = ["Punt","Kickoff","FG","Onside"];
 const PAT_PLAY_TYPES = ["PAT Kick","2pt Run","2pt Pass"];
 const NOTABLE_EVENTS = [
@@ -192,7 +192,7 @@ const state = {
   defPlaybook: {},   // { "Front/Coverage Name": ["Call A","Call B"] } -- DEFENSIVE fronts/coverages, kept separate from offense
   plays: [],          // logged rows
   cur: {},            // in-progress selections
-  tab: 'tag',
+  tab: 'setup',
   tendencyFilter: 'D',
   manualDown: 1,
   manualDistance: 10,
@@ -209,6 +209,11 @@ const state = {
   showToBoundary: true,
   showToTE: true,
   showToFB: true,
+  showTackleCredit: true,
+  showMotion: false,           // default OFF per request
+  showMotionToStrength: false, // only meaningful/shown when showMotion is on
+  showMotionToBoundary: false, // only meaningful/shown when showMotion is on
+  contentMode: 'tagstats',     // 'tag' | 'stats' | 'tagstats'
   appMode: 'live', // 'live' | 'scout'
   hudlImport: null, // { headers, rows, mapping, teamCol, teamOValue, teamDValue } while a Hudl file is being mapped, before commit
   lastHudlMapping: null, // { mapping, teamCol } remembered within this session so re-uploading a similarly-shaped file doesn't need re-mapping
@@ -426,6 +431,15 @@ function setShowToStrength(val){ state.showToStrength = val; render(); }
 function setShowToBoundary(val){ state.showToBoundary = val; render(); }
 function setShowToTE(val){ state.showToTE = val; render(); }
 function setShowToFB(val){ state.showToFB = val; render(); }
+function setShowTackleCredit(val){ state.showTackleCredit = val; render(); }
+function setShowMotion(val){
+  state.showMotion = val;
+  if(!val){ state.showMotionToStrength = false; state.showMotionToBoundary = false; } // sub-toggles only make sense when Motion itself is on
+  render();
+}
+function setShowMotionToStrength(val){ state.showMotionToStrength = val; render(); }
+function setShowMotionToBoundary(val){ state.showMotionToBoundary = val; render(); }
+function setContentMode(mode){ state.contentMode = mode; render(); }
 
 // Given where the ball was snapped from and which way the last play went, gives a defensible
 // guess at the next snap's hash. We only track L/M/R buckets (not exact yardage), so the only
@@ -456,6 +470,7 @@ function repeatLast(){
 function canLog(){
   if(!state.cur.odk || !state.cur.playType) return false;
   if(state.cur.odk === 'PAT') return !!state.cur.result;
+  if(state.contentMode === 'stats') return state.cur.gain !== undefined; // Hash/Direction aren't shown in Stats-only mode
   return state.cur.hash && state.cur.direction && (state.cur.gain !== undefined);
 }
 
@@ -477,6 +492,9 @@ function logPlay(){
     toBoundary: state.cur.toBoundary || '',
     toTE: state.cur.toTE || '',
     toFB: state.cur.toFB || '',
+    motion: state.cur.motion || '',
+    motionToStrength: state.cur.motionToStrength || '',
+    motionToBoundary: state.cur.motionToBoundary || '',
     result: state.cur.result || '',
     player: state.cur.player || '',
     passer: state.cur.passer || '',
@@ -598,7 +616,7 @@ function renderTagTab(){
   html += tileSection('ODK', ['O','D','K','PAT'], 'odk', 'small');
 
   if(state.cur.odk){
-    if(!isPAT){
+    if(!isPAT && state.contentMode !== 'stats'){
       html += tileSection('Formation', formationKeys, 'formation', 'small');
       if(plays) html += tileSection('Play (' + state.cur.formation + ')', plays, 'play', 'small');
     }
@@ -607,28 +625,39 @@ function renderTagTab(){
     if(isPAT){
       html += tileSection('Result', ['Good','No Good'], 'result', '');
     } else {
-      if(isOffense && state.cur.playType === 'Run' && rbList.length){
+      const showStats = state.contentMode !== 'tag';
+      const showTags = state.contentMode !== 'stats';
+      if(showStats && isOffense && state.cur.playType === 'Run' && rbList.length){
         html += tileSection('Ball Carrier', [...rbList,'Other'], 'player', 'small');
       }
-      if(isOffense && (state.cur.playType === 'Pass' || state.cur.playType === 'Sack')){
+      if(showStats && isOffense && (state.cur.playType === 'Pass' || state.cur.playType === 'Sack')){
         if(qbList) html += tileSection('Passer', [...qbList,'Other'], 'passer', 'small');
         if(state.cur.playType === 'Pass' && wrList.length) html += tileSection('Receiver (leave blank if incomplete)', [...wrList,'Other'], 'receiver', 'small');
       }
-      if(isDefense && defList){
+      if(showStats && isDefense && defList && state.showTackleCredit){
         html += tileSection('Tackle Credit', [...defList,'Other'], 'tackler', 'small');
       }
       if(isKicking){
-        if((state.cur.playType==='Kickoff'||state.cur.playType==='FG') && kList) html += tileSection('Kicker', [...kList,'Other'], 'player', 'small');
-        if(state.cur.playType==='Punt' && pList) html += tileSection('Punter', [...pList,'Other'], 'player', 'small');
+        if(showStats && (state.cur.playType==='Kickoff'||state.cur.playType==='FG') && kList) html += tileSection('Kicker', [...kList,'Other'], 'player', 'small');
+        if(showStats && state.cur.playType==='Punt' && pList) html += tileSection('Punter', [...pList,'Other'], 'player', 'small');
         if(state.cur.playType==='FG') html += tileSection('Result', ['Good','No Good'], 'result', '');
       }
 
-      html += tileSection('Hash', ['L','M','R'], 'hash', '');
-      html += tileSection('Direction', ['L','M','R'], 'direction', '');
-      if(state.showToStrength) html += tileSection('To Strength', ['YES','NO','NOT ON FIELD'], 'tostrength', 'small');
-      if(state.showToBoundary) html += tileSection('To Boundary/Field', ['Boundary','Field','Middle'], 'toBoundary', 'small');
-      if(state.showToTE) html += tileSection('To TE', ['YES','NO','NOT ON FIELD'], 'toTE', 'small');
-      if(state.showToFB) html += tileSection('To FB', ['YES','NO','NOT ON FIELD'], 'toFB', 'small');
+      if(showTags){
+        html += tileSection('Hash', ['L','M','R'], 'hash', '');
+        html += tileSection('Direction', ['L','M','R'], 'direction', '');
+        if(isOffense){
+          if(state.showToStrength) html += tileSection('To Strength', ['YES','NO','NOT ON FIELD'], 'tostrength', 'small');
+          if(state.showToBoundary) html += tileSection('To Boundary/Field', ['Boundary','Field','Middle'], 'toBoundary', 'small');
+          if(state.showToTE) html += tileSection('To TE', ['YES','NO','NOT ON FIELD'], 'toTE', 'small');
+          if(state.showToFB) html += tileSection('To FB', ['YES','NO','NOT ON FIELD'], 'toFB', 'small');
+        }
+        if(isDefense && state.showMotion){
+          html += tileSection('Motion', ['YES','NO'], 'motion', 'small');
+          if(state.showMotionToStrength) html += tileSection('Motion To Strength', ['YES','NO'], 'motionToStrength', 'small');
+          if(state.showMotionToBoundary) html += tileSection('Motion To Boundary/Field', ['Boundary','Field','Middle'], 'motionToBoundary', 'small');
+        }
+      }
 
       const gainOptions = [];
       for(let i=-2;i<=15;i++) gainOptions.push(i);
@@ -655,7 +684,7 @@ function renderTagTab(){
       html += `<div class="card">
         <div class="section-label">Notable Event <span style="font-weight:400; color:var(--muted); text-transform:none;">(optional — for the weird stuff)</span></div>
         <div class="hint" style="margin-top:0;">If the DEFENSE recovers a fumble, use the Turnover toggle above instead — this list is for things that don't change possession, or aren't covered elsewhere.</div>
-        <div class="grid">
+        <div class="grid" style="grid-template-columns: repeat(auto-fill, minmax(130px,1fr));">
           ${NOTABLE_EVENTS.map(ev=>`<button class="tile small ${state.cur.notableEvent===ev?'selected':''}" data-field="notableEvent" data-value="${escAttr(ev)}" onclick="handleTileClick(this)">${escAttr(ev)}</button>`).join('')}
         </div>
         ${state.cur.notableEvent==='Other (type below)' ? `
@@ -690,7 +719,7 @@ function renderTagTab(){
 
 function tileSection(label, options, field, sizeClass){
   const cls = sizeClass ? 'tile '+sizeClass : 'tile wide';
-  const isStrengthField = ['tostrength','toTE','toFB'].includes(field);
+  const isStrengthField = ['tostrength','toTE','toFB','motion','motionToStrength'].includes(field);
   return `<div class="card">
     <div class="section-label">${label}</div>
     <div class="grid">
@@ -738,7 +767,7 @@ function renderTendenciesTab(){
 
   if(!total){ html += `<div class="empty">Log a few plays to see live tendencies here.</div>`; return html; }
 
-  const types = ['Run','Pass','RPO','Sack','Penalty'];
+  const types = ['Run','Pass','Sack','Penalty'];
   html += `<div class="card"><div class="section-label">Play Mix</div>`;
   types.forEach(t=>{ const c = rows.filter(r=>r.playType===t).length; if(c) html += pctBar(t, c, total); });
   html += `</div>`;
@@ -817,7 +846,7 @@ function computeBoxScoreData(){
     });
     return map;
   }
-  const totalPlays = offRows.filter(r=>['Run','Pass','RPO','Sack'].includes(r.playType));
+  const totalPlays = offRows.filter(r=>['Run','Pass','Sack'].includes(r.playType));
   const totalYards = totalPlays.reduce((s,r)=>s+(r.gain||0),0);
   const totalTDs = state.plays.filter(r=>r.isTD).length;
   const totalTOs = state.plays.filter(r=>r.isTurnover).length;
@@ -908,12 +937,25 @@ function renderSetupTab(){
   }
 
   let html = `<div class="card">
-    <div class="section-label">Field Toggles (Tag tab)</div>
-    <div class="hint" style="margin-top:0;">Turn each of these on or off independently — skip whatever your staff isn't tracking this week.</div>
+    <div class="section-label">Offense Toggles (Tag tab)</div>
+    <div class="hint" style="margin-top:0;">Turn each of these on or off independently — skip whatever your staff isn't tracking this week. These only appear on Offense (O) snaps.</div>
     ${toggleRow('To Strength', state.showToStrength, "setShowToStrength(true)", "setShowToStrength(false)")}
     ${toggleRow('To Boundary/Field', state.showToBoundary, "setShowToBoundary(true)", "setShowToBoundary(false)")}
     ${toggleRow('To TE', state.showToTE, "setShowToTE(true)", "setShowToTE(false)")}
     ${toggleRow('To FB', state.showToFB, "setShowToFB(true)", "setShowToFB(false)")}
+  </div>
+
+  <div class="card">
+    <div class="section-label">Defense Toggles (Tag tab)</div>
+    <div class="hint" style="margin-top:0;">These only appear on Defense (D) snaps.</div>
+    ${toggleRow('Tackle Credit', state.showTackleCredit, "setShowTackleCredit(true)", "setShowTackleCredit(false)")}
+    ${toggleRow('Motion', state.showMotion, "setShowMotion(true)", "setShowMotion(false)")}
+    ${state.showMotion ? `
+    <div style="margin-left:16px; padding-left:12px; border-left:2px solid var(--line);">
+      ${toggleRow('Motion To Strength (Y/N)', state.showMotionToStrength, "setShowMotionToStrength(true)", "setShowMotionToStrength(false)")}
+      ${toggleRow('Motion To Boundary/Field', state.showMotionToBoundary, "setShowMotionToBoundary(true)", "setShowMotionToBoundary(false)")}
+    </div>
+    ` : ''}
   </div>
 
   <div class="card">
@@ -929,9 +971,15 @@ function renderSetupTab(){
   <div class="card">
     <div class="section-label">Mode</div>
     <div class="hint">Mode: <b>Live</b> is for tagging during the game (urgent framing, export reminders). <b>Scout</b> is for reviewing film after the fact — no clock pressure, calmer framing. All features work the same in both; this just changes tone/emphasis.</div>
-    <div class="filter-pill" style="width:fit-content;">
+    <div class="filter-pill" style="width:fit-content; margin-bottom:16px;">
       <button class="${state.appMode==='live'?'active':''}" onclick="setAppMode('live')">Live</button>
       <button class="${state.appMode==='scout'?'active':''}" onclick="setAppMode('scout')">Scout</button>
+    </div>
+    <div class="hint" style="margin-top:0;"><b>Tag</b>: tendency fields only, no player attribution. <b>Stats</b>: player attribution (ball carrier, passer, etc.) and scoring only, no tendency fields, hash/direction not required. <b>Tag + Stats</b>: everything, as before.</div>
+    <div class="filter-pill" style="width:fit-content;">
+      <button class="${state.contentMode==='tag'?'active':''}" onclick="setContentMode('tag')">Tag</button>
+      <button class="${state.contentMode==='stats'?'active':''}" onclick="setContentMode('stats')">Stats</button>
+      <button class="${state.contentMode==='tagstats'?'active':''}" onclick="setContentMode('tagstats')">Tag + Stats</button>
     </div>
   </div>
   <div class="card">
@@ -1503,6 +1551,7 @@ function importCSV(inputEl){
 function render(){
   const ns = state.nextSituation;
   const isScout = state.appMode === 'scout';
+  document.getElementById('tab-tag').textContent = state.contentMode === 'tag' ? 'Tag' : state.contentMode === 'stats' ? 'Stats' : 'Tag/Stats';
   document.getElementById('sbDD').textContent = ns.mode === 'dd' ? fmtDD(ns.down, ns.distance) : ns.label;
   document.getElementById('sbSub').textContent = isScout
     ? `Play ${state.plays.length+1} · ${state.plays.length} tagged`
@@ -1510,7 +1559,7 @@ function render(){
   document.getElementById('sbLabel').textContent = state.editingStart ? 'Manual Override' : (isScout ? 'Situation' : 'Next Snap');
   document.getElementById('sbDD').style.textShadow = isScout ? 'none' : '0 0 18px rgba(255,182,39,.35)';
 
-  const offRows = state.plays.filter(p=>p.odk==='O' && ['Run','Pass','RPO','Sack'].includes(p.playType));
+  const offRows = state.plays.filter(p=>p.odk==='O' && ['Run','Pass','Sack'].includes(p.playType));
   const yds = offRows.reduce((s,r)=>s+(r.gain||0),0);
   const tds = state.plays.filter(r=>r.isTD).length;
   const tos = state.plays.filter(r=>r.isTurnover).length;
