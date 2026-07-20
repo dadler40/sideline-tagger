@@ -160,6 +160,7 @@
 <script>
 // ---------------- STATE ----------------
 const DEFAULT_FORMATIONS = ["Right","Left","Roger","Larry","Other"];
+const DEFAULT_DEF_FORMATIONS = ["King","Queen","Trips","Pro","Other"];
 const OFF_DEF_PLAY_TYPES = ["Run","Pass","RPO","Sack","Penalty"];
 const KICK_PLAY_TYPES = ["Punt","Kickoff","FG","Onside"];
 const PAT_PLAY_TYPES = ["PAT Kick","2pt Run","2pt Pass"];
@@ -177,8 +178,18 @@ const NOTABLE_EVENTS = [
 ];
 
 const state = {
-  roster: {},       // { "RB": ["Name1","Name2"], "QB":[...], "WR":[...], "DEF":[...], "K":[...], "P":[...] }
-  playbook: {},      // { "Formation Name": ["Play A","Play B"] }
+  // Default/base roster -- last year's team, will change. Favorites pre-set per priority:
+  // Check + Roberts on top for carries, Check on top for pass attempts, Hackbarth on top for catches.
+  roster: {
+    QB: ["Tommy Check"],
+    RB: ["Tommy Check","Maxim Roberts","Jameson Degenhardt"],
+    WR: ["Hackbarth","Hudson Davis"],
+    K: ["Sam King"],
+    P: ["Tommy Check"],
+    DEF: ["Ben Spears","Jameson Degenhardt"],
+  },
+  playbook: {},      // { "Formation Name": ["Play A","Play B"] } -- OFFENSIVE formations/plays
+  defPlaybook: {},   // { "Front/Coverage Name": ["Call A","Call B"] } -- DEFENSIVE fronts/coverages, kept separate from offense
   plays: [],          // logged rows
   cur: {},            // in-progress selections
   tab: 'tag',
@@ -186,7 +197,7 @@ const state = {
   manualDown: 1,
   manualDistance: 10,
   editingStart: false,
-  favorites: {},      // { "Smith": true }
+  favorites: { "Tommy Check": true, "Maxim Roberts": true, "Hackbarth": true },      // { "Smith": true }
   lastExportAt: 0,     // count of plays at last export/share
   nextSituation: { mode:'dd', down:1, distance:10, forcedOdk:null },
   lastActionNote: '',  // shown as a dismissible banner after an auto-transition
@@ -194,7 +205,10 @@ const state = {
   opponentName: 'Opponent',
   gameDate: '',
   quarter: '1',
-  showStrengthFields: true,
+  showToStrength: true,
+  showToBoundary: true,
+  showToTE: true,
+  showToFB: true,
   appMode: 'live', // 'live' | 'scout'
   hudlImport: null, // { headers, rows, mapping, teamCol, teamOValue, teamDValue } while a Hudl file is being mapped, before commit
   lastHudlMapping: null, // { mapping, teamCol } remembered within this session so re-uploading a similarly-shaped file doesn't need re-mapping
@@ -348,14 +362,27 @@ function loadPlaybook(){
   state.playbook = parseKeyList(text);
   render();
 }
+function loadDefPlaybook(){
+  const text = document.getElementById('defPlaybookInput').value;
+  state.defPlaybook = parseKeyList(text);
+  render();
+}
 function clearRoster(){ state.roster = {}; document.getElementById('rosterInput').value=''; render(); }
 function clearPlaybook(){ state.playbook = {}; document.getElementById('playbookInput').value=''; render(); }
+function clearDefPlaybook(){ state.defPlaybook = {}; document.getElementById('defPlaybookInput').value=''; render(); }
 
 function handleFileUpload(inputEl, targetTextareaId){
   const file = inputEl.files[0];
   if(!file) return;
   const reader = new FileReader();
-  reader.onload = e => { document.getElementById(targetTextareaId).value = e.target.result; };
+  reader.onload = e => {
+    document.getElementById(targetTextareaId).value = e.target.result;
+    // Auto-load immediately -- previously this just filled the text box and silently
+    // did nothing until "Load Roster"/"Load Playbook" was clicked separately.
+    if(targetTextareaId === 'rosterInput') loadRoster();
+    else if(targetTextareaId === 'playbookInput') loadPlaybook();
+    else if(targetTextareaId === 'defPlaybookInput') loadDefPlaybook();
+  };
   reader.readAsText(file);
 }
 
@@ -395,17 +422,34 @@ function saveGameInfo(){
 }
 
 function setAppMode(mode){ state.appMode = mode; render(); }
-function setShowStrengthFields(val){ state.showStrengthFields = val; render(); }
+function setShowToStrength(val){ state.showToStrength = val; render(); }
+function setShowToBoundary(val){ state.showToBoundary = val; render(); }
+function setShowToTE(val){ state.showToTE = val; render(); }
+function setShowToFB(val){ state.showToFB = val; render(); }
+
+// Given where the ball was snapped from and which way the last play went, gives a defensible
+// guess at the next snap's hash. We only track L/M/R buckets (not exact yardage), so the only
+// case we can be confident about is "ran back toward the hash it was already on." Anything else
+// (up the middle, or all the way to the far side) we can't be sure crossed the whole field --
+// Middle is the honest estimate rather than assuming a full hash swing.
+function predictNextHash(prevHash, direction){
+  if(prevHash === 'L' && direction === 'L') return 'L';
+  if(prevHash === 'R' && direction === 'R') return 'R';
+  if(prevHash && direction) return 'M';
+  return prevHash || '';
+}
 
 // Copies the pre-snap-ish fields from the last real play forward, since a lot of series
 // run the same look back-to-back. Deliberately leaves Play Type and Gain blank -- those
-// describe THIS snap's outcome and should always be entered fresh.
+// describe THIS snap's outcome and should always be entered fresh. Hash is predicted rather
+// than copied, since the ball's actual field position shifts based on the previous play's direction.
 function repeatLast(){
   const lp = lastMeaningfulPlay();
   if(!lp) return;
-  ['odk','formation','play','hash','direction','tostrength','toTE','toFB'].forEach(f=>{
+  ['odk','formation','play','direction','tostrength','toBoundary','toTE','toFB'].forEach(f=>{
     if(lp[f]) state.cur[f] = lp[f];
   });
+  if(lp.hash) state.cur.hash = predictNextHash(lp.hash, lp.direction);
   render();
 }
 
@@ -430,6 +474,7 @@ function logPlay(){
     hash: state.cur.hash || '',
     direction: state.cur.direction || '',
     tostrength: state.cur.tostrength || '',
+    toBoundary: state.cur.toBoundary || '',
     toTE: state.cur.toTE || '',
     toFB: state.cur.toFB || '',
     result: state.cur.result || '',
@@ -515,14 +560,18 @@ function bumpManual(field, delta){
 // ---------------- RENDER: TAG TAB ----------------
 function renderTagTab(){
   const ns = state.nextSituation;
-  const formationKeys = Object.keys(state.playbook).length ? Object.keys(state.playbook) : DEFAULT_FORMATIONS;
-  const plays = state.cur.formation && state.playbook[state.cur.formation] ? state.playbook[state.cur.formation] : null;
-
   const isOffense = state.cur.odk === 'O';
   const isDefense = state.cur.odk === 'D';
   const isKicking = state.cur.odk === 'K';
   const isPAT = state.cur.odk === 'PAT';
   const playTypeOptions = isKicking ? KICK_PLAY_TYPES : (isPAT ? PAT_PLAY_TYPES : OFF_DEF_PLAY_TYPES);
+
+  // Offense and Defense use completely separate formation vocabularies -- your run/pass formations
+  // are meaningless on defensive snaps, and vice versa for fronts/coverages.
+  const activePlaybook = isDefense ? state.defPlaybook : state.playbook;
+  const defaultFormationList = isDefense ? DEFAULT_DEF_FORMATIONS : DEFAULT_FORMATIONS;
+  const formationKeys = Object.keys(activePlaybook).length ? Object.keys(activePlaybook) : defaultFormationList;
+  const plays = state.cur.formation && activePlaybook[state.cur.formation] ? activePlaybook[state.cur.formation] : null;
 
   const rbList = sortedWithFavorites([...(state.roster['RB']||[]), ...(state.roster['FB']||[])]);
   const qbList = sortedWithFavorites(state.roster['QB']) || null;
@@ -576,11 +625,10 @@ function renderTagTab(){
 
       html += tileSection('Hash', ['L','M','R'], 'hash', '');
       html += tileSection('Direction', ['L','M','R'], 'direction', '');
-      if(state.showStrengthFields){
-        html += tileSection('To Strength', ['YES','NO','NOT ON FIELD'], 'tostrength', 'small');
-        html += tileSection('To TE', ['YES','NO','NOT ON FIELD'], 'toTE', 'small');
-        html += tileSection('To FB', ['YES','NO','NOT ON FIELD'], 'toFB', 'small');
-      }
+      if(state.showToStrength) html += tileSection('To Strength', ['YES','NO','NOT ON FIELD'], 'tostrength', 'small');
+      if(state.showToBoundary) html += tileSection('To Boundary/Field', ['Boundary','Field','Middle'], 'toBoundary', 'small');
+      if(state.showToTE) html += tileSection('To TE', ['YES','NO','NOT ON FIELD'], 'toTE', 'small');
+      if(state.showToFB) html += tileSection('To FB', ['YES','NO','NOT ON FIELD'], 'toFB', 'small');
 
       const gainOptions = [];
       for(let i=-2;i<=15;i++) gainOptions.push(i);
@@ -707,6 +755,16 @@ function renderTendenciesTab(){
   html += strengthCard('Run to Strength', 'tostrength');
   html += strengthCard('Run to TE', 'toTE');
   html += strengthCard('Run to FB', 'toFB');
+
+  const boundaryRows = rows.filter(r=>['Boundary','Field','Middle'].includes(r.toBoundary));
+  if(boundaryRows.length){
+    html += `<div class="card"><div class="section-label">To Boundary / Field / Middle</div>`;
+    ['Boundary','Field','Middle'].forEach(v=>{
+      const c = boundaryRows.filter(r=>r.toBoundary===v).length;
+      html += pctBar(v, c, boundaryRows.length);
+    });
+    html += `</div>`;
+  }
 
   html += `<div class="card"><div class="section-label">Play Direction</div>`;
   ['L','M','R'].forEach(d=>{
@@ -838,7 +896,27 @@ function renderSetupTab(){
   const duckUrlPDF = "https://duckduckgo.com/?ia=chat&q=" + encodeURIComponent(duckPromptPDF);
   const duckPromptText = "Make this text roster a csv, using same player order as listed";
   const duckUrlText = "https://duckduckgo.com/?ia=chat&q=" + encodeURIComponent(duckPromptText);
+
+  function toggleRow(label, val, onFn, offFn){
+    return `<div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:10px;">
+      <span style="font-size:13px; color:var(--text);">${label}</span>
+      <div class="filter-pill" style="width:fit-content;">
+        <button class="${val?'active':''}" onclick="${onFn}">On</button>
+        <button class="${!val?'active':''}" onclick="${offFn}">Off</button>
+      </div>
+    </div>`;
+  }
+
   let html = `<div class="card">
+    <div class="section-label">Field Toggles (Tag tab)</div>
+    <div class="hint" style="margin-top:0;">Turn each of these on or off independently — skip whatever your staff isn't tracking this week.</div>
+    ${toggleRow('To Strength', state.showToStrength, "setShowToStrength(true)", "setShowToStrength(false)")}
+    ${toggleRow('To Boundary/Field', state.showToBoundary, "setShowToBoundary(true)", "setShowToBoundary(false)")}
+    ${toggleRow('To TE', state.showToTE, "setShowToTE(true)", "setShowToTE(false)")}
+    ${toggleRow('To FB', state.showToFB, "setShowToFB(true)", "setShowToFB(false)")}
+  </div>
+
+  <div class="card">
     <div class="section-label">Game Info (used on the final report)</div>
     <div class="hint">Your team name, the opponent, and the date — these show up on the header of the emailed box score.</div>
     <div class="row-btns" style="margin-bottom:8px;">
@@ -849,16 +927,11 @@ function renderSetupTab(){
     <button class="btn-primary" style="width:100%;" onclick="saveGameInfo()">Save Game Info</button>
   </div>
   <div class="card">
-    <div class="section-label">Settings</div>
+    <div class="section-label">Mode</div>
     <div class="hint">Mode: <b>Live</b> is for tagging during the game (urgent framing, export reminders). <b>Scout</b> is for reviewing film after the fact — no clock pressure, calmer framing. All features work the same in both; this just changes tone/emphasis.</div>
-    <div class="filter-pill" style="width:fit-content; margin-bottom:14px;">
+    <div class="filter-pill" style="width:fit-content;">
       <button class="${state.appMode==='live'?'active':''}" onclick="setAppMode('live')">Live</button>
       <button class="${state.appMode==='scout'?'active':''}" onclick="setAppMode('scout')">Scout</button>
-    </div>
-    <div class="hint" style="margin-top:0;">Show To Strength / To TE / To FB while tagging? Turn off if your staff doesn't track this.</div>
-    <div class="filter-pill" style="width:fit-content;">
-      <button class="${state.showStrengthFields?'active':''}" onclick="setShowStrengthFields(true)">On</button>
-      <button class="${!state.showStrengthFields?'active':''}" onclick="setShowStrengthFields(false)">Off</button>
     </div>
   </div>
   <div class="card">
@@ -890,13 +963,24 @@ function renderSetupTab(){
   }
 
   html += `<div class="card">
-    <div class="section-label">Playbook (formations &amp; plays)</div>
-    <div class="hint">One formation per line: <code>Formation Name: Play A, Play B, Play C</code>.</div>
+    <div class="section-label">Offensive Playbook (formations &amp; plays)</div>
+    <div class="hint">One formation per line: <code>Formation Name: Play A, Play B, Play C</code>. Used only on Offense (O) snaps.</div>
     <input type="file" accept=".txt,.csv" onchange="handleFileUpload(this,'playbookInput')" style="margin-bottom:8px; color:var(--muted); font-size:12px;">
     <textarea id="playbookInput" placeholder="Trips Right: 92 Bang, Zoom Post, Draw&#10;Ace: Iso, PA Boot, Slant Flat">${Object.keys(state.playbook).map(k=>`${k}: ${state.playbook[k].join(', ')}`).join('\n')}</textarea>
     <div class="row-btns" style="margin-top:8px;">
       <button class="btn-primary" onclick="loadPlaybook()">Load Playbook</button>
       <button class="btn-secondary" onclick="clearPlaybook()">Clear</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="section-label">Defensive Playbook (fronts &amp; coverages)</div>
+    <div class="hint">Separate from offense on purpose — your fronts/coverages don't share a vocabulary with your run/pass formations. One front per line: <code>Front Name: Call A, Call B</code>. Used only on Defense (D) snaps. Default if left empty: King, Queen, Trips, Pro.</div>
+    <input type="file" accept=".txt,.csv" onchange="handleFileUpload(this,'defPlaybookInput')" style="margin-bottom:8px; color:var(--muted); font-size:12px;">
+    <textarea id="defPlaybookInput" placeholder="King: Cover 3, Cover 1&#10;Queen: Cover 2, Blitz">${Object.keys(state.defPlaybook).map(k=>`${k}: ${state.defPlaybook[k].join(', ')}`).join('\n')}</textarea>
+    <div class="row-btns" style="margin-top:8px;">
+      <button class="btn-primary" onclick="loadDefPlaybook()">Load Defensive Playbook</button>
+      <button class="btn-secondary" onclick="clearDefPlaybook()">Clear</button>
     </div>
   </div>`;
   return html;
@@ -992,7 +1076,7 @@ function renderExportTab(){
   </div>
   <div class="card scroll-x">
     <table>
-      <tr><th>#</th><th>ODK</th><th>Form.</th><th>Down</th><th>Dist</th><th>Gain</th><th>Type</th><th>Hash</th><th>Dir</th><th>ToStr</th><th>Player</th><th>Result</th><th>TD</th><th>TO</th><th>Saf</th><th>Notes</th><th></th></tr>
+      <tr><th>#</th><th>ODK</th><th>Form.</th><th>Down</th><th>Dist</th><th>Gain</th><th>Type</th><th>Hash</th><th>Dir</th><th>ToStr</th><th>ToBnd</th><th>Player</th><th>Result</th><th>TD</th><th>TO</th><th>Saf</th><th>Notes</th><th></th></tr>
       ${state.plays.map((p,i)=>`<tr>
         <td>${i+1}</td>
         <td><select style="width:52px;" onchange="updatePlayField(${i},'odk',this.value)">${['','O','D','K','PAT'].map(v=>`<option value="${v}" ${p.odk===v?'selected':''}>${v||'-'}</option>`).join('')}</select></td>
@@ -1004,6 +1088,7 @@ function renderExportTab(){
         <td><select style="width:52px;" onchange="updatePlayField(${i},'hash',this.value)">${['','L','M','R'].map(v=>`<option value="${v}" ${p.hash===v?'selected':''}>${v||'-'}</option>`).join('')}</select></td>
         <td><select style="width:52px;" onchange="updatePlayField(${i},'direction',this.value)">${['','L','M','R'].map(v=>`<option value="${v}" ${p.direction===v?'selected':''}>${v||'-'}</option>`).join('')}</select></td>
         <td><select style="width:80px;" onchange="updatePlayField(${i},'tostrength',this.value)">${['','YES','NO','NOT ON FIELD'].map(v=>`<option value="${v}" ${p.tostrength===v?'selected':''}>${v||'-'}</option>`).join('')}</select></td>
+        <td><select style="width:70px;" onchange="updatePlayField(${i},'toBoundary',this.value)">${['','Boundary','Field','Middle'].map(v=>`<option value="${v}" ${p.toBoundary===v?'selected':''}>${v||'-'}</option>`).join('')}</select></td>
         <td><input type="text" value="${escAttr(p.player)}" style="width:80px;" onchange="updatePlayField(${i},'player',this.value)"></td>
         <td><input type="text" value="${escAttr(p.result)}" style="width:70px;" onchange="updatePlayField(${i},'result',this.value)"></td>
         <td><input type="checkbox" ${p.isTD?'checked':''} onchange="updatePlayField(${i},'isTD',this.checked)"></td>
@@ -1147,10 +1232,10 @@ function buildGameReportText(){
 }
 
 function buildCSVString(){
-  const headers = ['ODK','Formation','Play','Down','Distance','Gain','PlayType','Hash','Direction','ToStrength','ToTE','ToFB','BallCarrier','Passer','Receiver','Tackler','Result','TD','Turnover','Safety','Notes','InternalODK','PendingReceiver','DrivingSide'];
+  const headers = ['ODK','Formation','Play','Down','Distance','Gain','PlayType','Hash','Direction','ToStrength','ToBoundary','ToTE','ToFB','BallCarrier','Passer','Receiver','Tackler','Result','TD','Turnover','Safety','Notes','InternalODK','PendingReceiver','DrivingSide'];
   const lines = [headers.join(',')];
   state.plays.forEach(p=>{
-    lines.push([hudlOdk(p),p.formation,p.play,p.down,p.distance,p.gain,p.playType,p.hash,p.direction,p.tostrength,p.toTE,p.toFB,p.player,p.passer,p.receiver,p.tackler,p.result,p.isTD?'Y':'',p.isTurnover?'Y':'',p.isSafety?'Y':'',p.notes||'',p.odk,p.pendingReceiver||'',p.drivingSide||''].map(csvEscape).join(','));
+    lines.push([hudlOdk(p),p.formation,p.play,p.down,p.distance,p.gain,p.playType,p.hash,p.direction,p.tostrength,p.toBoundary,p.toTE,p.toFB,p.player,p.passer,p.receiver,p.tackler,p.result,p.isTD?'Y':'',p.isTurnover?'Y':'',p.isSafety?'Y':'',p.notes||'',p.odk,p.pendingReceiver||'',p.drivingSide||''].map(csvEscape).join(','));
   });
   return lines.join('\n');
 }
@@ -1388,19 +1473,19 @@ function importCSV(inputEl){
       const down = c[3]!==undefined && c[3]!=='' ? parseInt(c[3]) : null;
       const distance = c[4]!==undefined && c[4]!=='' ? parseInt(c[4]) : null;
       return {
-        // c[21] (InternalODK) preserves 'PAT' distinctly from the Hudl-mapped 'K' in c[0]; fall back to c[0] for older exports.
-        odk: c[21] || c[0] || '',
+        // c[22] (InternalODK) preserves 'PAT' distinctly from the Hudl-mapped 'K' in c[0]; fall back to c[0] for older exports.
+        odk: c[22] || c[0] || '',
         formation:c[1]||'', play:c[2]||'',
         down: isNaN(down) ? null : down,
         distance: isNaN(distance) ? null : distance,
         gain: c[5]!==undefined && c[5]!=='' ? parseInt(c[5]) : undefined,
         playType:c[6]||'', hash:c[7]||'', direction:c[8]||'', tostrength:c[9]||'',
-        toTE:c[10]||'', toFB:c[11]||'',
-        player:c[12]||'', passer:c[13]||'', receiver:c[14]||'', tackler:c[15]||'',
-        result:c[16]||'', isTD: c[17]==='Y', isTurnover: c[18]==='Y', isSafety: c[19]==='Y',
-        notes: c[20] || '',
-        pendingReceiver: c[22] || null,
-        drivingSide: c[23] || null,
+        toBoundary:c[10]||'', toTE:c[11]||'', toFB:c[12]||'',
+        player:c[13]||'', passer:c[14]||'', receiver:c[15]||'', tackler:c[16]||'',
+        result:c[17]||'', isTD: c[18]==='Y', isTurnover: c[19]==='Y', isSafety: c[20]==='Y',
+        notes: c[21] || '',
+        pendingReceiver: c[23] || null,
+        drivingSide: c[24] || null,
       };
     });
     state.plays = restored;
