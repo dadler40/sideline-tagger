@@ -231,6 +231,9 @@ const state = {
   showMotionToStrength: false, // only meaningful/shown when showMotion is on
   showMotionToBoundary: false, // only meaningful/shown when showMotion is on
   showFront: true,
+  showClock: false,
+  showYardLine: false,
+  showHowToGuide: false,
   showCoverage: true,
   showStunt: true,
   showDefPlay: true,
@@ -482,6 +485,9 @@ function setShowMotion(val){
 function setShowMotionToStrength(val){ state.showMotionToStrength = val; render(); }
 function setShowMotionToBoundary(val){ state.showMotionToBoundary = val; render(); }
 function setShowFront(val){ state.showFront = val; render(); }
+function setShowClock(val){ state.showClock = val; render(); }
+function setShowYardLine(val){ state.showYardLine = val; render(); }
+function toggleHowToGuide(){ state.showHowToGuide = !state.showHowToGuide; render(); }
 function setShowCoverage(val){ state.showCoverage = val; render(); }
 function setShowStunt(val){ state.showStunt = val; render(); }
 function setShowDefPlay(val){ state.showDefPlay = val; render(); }
@@ -545,6 +551,8 @@ function logPlay(){
     coverage: state.cur.coverage || '',
     stunt: state.cur.stunt || '',
     stuntCall: state.cur.stuntCall === 'Other (type below)' ? (state.cur.stuntCallOther || '') : (state.cur.stuntCall || ''),
+    clock: state.cur.clock || '',
+    yardLine: state.cur.yardLine || '',
     result: state.cur.result || '',
     player: state.cur.player || '',
     passer: state.cur.passer || '',
@@ -713,6 +721,7 @@ function renderTagTab(){
   } else {
     html += `<button class="undo-btn" style="width:100%; margin-bottom:8px;" onclick="requestEndDrive()">End This Drive?</button>`;
   }
+  html += `<button class="undo-btn" style="width:100%; margin-bottom:8px; color:var(--text);" onclick="setTab('export')">✎ Fix a Previous Play</button>`;
   html += `<div class="hint" style="margin-top:8px; margin-bottom:6px;">End of quarter — advances the clock and, for halftime, figures out who receives to start the 2nd half.</div>
     <div class="row-btns" style="flex-wrap:wrap;">
       <button class="btn-secondary" style="flex:1; min-width:70px;" onclick="endQ1()">End Q1</button>
@@ -727,6 +736,19 @@ function renderTagTab(){
   html += tileSection('ODK', ['O','D','K','PAT'], 'odk', 'small');
 
   if(state.cur.odk){
+    if(state.showClock || state.showYardLine){
+      const drive = computeDriveInfo();
+      const isNewDrive = drive.playInDrive === 1;
+      const isScoring = !!state.cur.isTD;
+      const highlight = isNewDrive || isScoring;
+      html += `<div class="card" ${highlight ? 'style="border-color:var(--amber);"' : ''}>
+        <div class="section-label">${highlight ? (isScoring ? '⚠ Clock at Score' : '⚠ Clock/Ball at Start of Drive') : 'Clock / Ball Position'}</div>
+        <div class="row-btns">
+          ${state.showClock ? `<input type="text" value="${escAttr(state.cur.clock||'')}" placeholder="Clock (e.g. 8:42)" style="flex:1; padding:12px; border-radius:10px; border:1px solid var(--line); background:var(--panel); color:var(--text); font-size:14px;" onchange="state.cur.clock=this.value;">` : ''}
+          ${state.showYardLine ? `<input type="text" value="${escAttr(state.cur.yardLine||'')}" placeholder="Yard Line (e.g. OWN 25)" style="flex:1; padding:12px; border-radius:10px; border:1px solid var(--line); background:var(--panel); color:var(--text); font-size:14px;" onchange="state.cur.yardLine=this.value;">` : ''}
+        </div>
+      </div>`;
+    }
     if(!isPAT && state.contentMode !== 'stats'){
       html += tileSection('Formation', formationKeys, 'formation', 'small');
       if(plays && (isOffense || state.showDefPlay)){
@@ -876,10 +898,11 @@ function renderTendenciesTab(){
 
   function pctBar(label, count, total, color){
     const pct = total ? (count/total*100) : 0;
-    return `<div class="stat-row">
-      <span class="stat-name">${label}</span>
-      <div class="stat-bar-wrap"><div class="stat-bar" style="width:${pct}%; background:${color||'var(--amber)'};"></div></div>
-      <span class="stat-pct">${pct.toFixed(1)}%</span>
+    const isStrong = total >= 3 && (pct >= 70 || pct <= 30); // need a few plays before a % means anything
+    return `<div class="stat-row" ${isStrong ? 'style="background:rgba(255,182,39,0.08); border-radius:8px; padding:8px 6px; margin:2px 0;"' : ''}>
+      <span class="stat-name">${isStrong ? '⚠ ' : ''}${label}</span>
+      <div class="stat-bar-wrap"><div class="stat-bar" style="width:${pct}%; background:${isStrong ? 'var(--amber)' : (color||'var(--amber)')};"></div></div>
+      <span class="stat-pct" style="${isStrong ? 'color:var(--amber); font-size:15px;' : ''}">${pct.toFixed(1)}%</span>
     </div>`;
   }
 
@@ -894,6 +917,36 @@ function renderTendenciesTab(){
   </div>`;
 
   if(!total){ html += `<div class="empty">Log a few plays to see live tendencies here.</div>`; return html; }
+
+  // ---- Head Coach glance summary: score + the 2-3 loudest tendencies, nothing else ----
+  {
+    const scoring = computeScoring();
+    const runCount = rows.filter(r=>r.playType==='Run').length;
+    const passCount = rows.filter(r=>r.playType==='Pass').length;
+    const runPassTotal = runCount + passCount;
+    const runPct = runPassTotal ? (runCount/runPassTotal*100) : null;
+
+    const dirCounts = {L:0,M:0,R:0};
+    rows.forEach(r=>{ if(dirCounts[r.direction]!==undefined) dirCounts[r.direction]++; });
+    const dirTotal = dirCounts.L+dirCounts.M+dirCounts.R;
+    let topDir = null, topDirPct = 0;
+    if(dirTotal){
+      Object.entries(dirCounts).forEach(([d,c])=>{ const p=c/dirTotal*100; if(p>topDirPct){ topDirPct=p; topDir=d; } });
+    }
+
+    const headlines = [];
+    if(runPct !== null) headlines.push(`${runPct>=50?'RUN':'PASS'} ${Math.round(runPct>=50?runPct:100-runPct)}%`);
+    if(topDir) headlines.push(`${({L:'LEFT',M:'MIDDLE',R:'RIGHT'})[topDir]} ${Math.round(topDirPct)}%`);
+
+    html += `<div class="card" style="border-color:var(--amber); background:var(--amber-dim);">
+      <div class="section-label" style="color:var(--amber);">Head Coach Glance</div>
+      <div style="font-family:'SFMono-Regular',Menlo,monospace; font-size:28px; font-weight:800; color:var(--text); margin:4px 0;">
+        ${escAttr(state.teamName)} ${scoring.yourScore} — ${scoring.oppScore} ${escAttr(state.opponentName)}
+      </div>
+      <div style="font-size:14px; color:var(--muted); margin-bottom:8px;">${total} plays under this filter</div>
+      ${headlines.length ? `<div style="font-size:20px; font-weight:800; color:var(--amber);">${headlines.join('  ·  ')}</div>` : ''}
+    </div>`;
+  }
 
   const types = ['Run','Pass','Sack','Penalty'];
   html += `<div class="card"><div class="section-label">Play Mix</div>`;
@@ -937,6 +990,29 @@ function renderTendenciesTab(){
     const formTotal = rows.filter(r=>r.formation).length;
     formationsUsed.forEach(fo=>{ const c = rows.filter(r=>r.formation===fo).length; html += pctBar(fo, c, formTotal); });
     html += `</div>`;
+  }
+
+  // Play Call Efficiency — which specific calls are actually gaining yards, not just how often they're run.
+  const playCallRows = rows.filter(r => r.play && ['Run','Pass'].includes(r.playType) && r.gain != null);
+  if(playCallRows.length){
+    const byPlay = {};
+    playCallRows.forEach(r=>{
+      const key = r.play;
+      if(!byPlay[key]) byPlay[key] = { count:0, totalGain:0, formation:r.formation };
+      byPlay[key].count++;
+      byPlay[key].totalGain += r.gain;
+    });
+    const sorted = Object.entries(byPlay).sort((a,b)=>b[1].count-a[1].count);
+    html += `<div class="card"><div class="section-label">Play Call Efficiency</div>
+      <div class="hint" style="margin-top:0;">Avg yards per play call — which specific calls are actually working, not just which get called most.</div>
+      <div class="scroll-x"><table>
+        <tr><th>Play</th><th>Formation</th><th>Calls</th><th>Avg Gain</th></tr>
+        ${sorted.map(([play,d])=>{
+          const avg = d.totalGain/d.count;
+          return `<tr><td>${play}</td><td>${d.formation||''}</td><td>${d.count}</td><td style="color:${avg>=5?'var(--green)':avg<0?'var(--red)':'var(--text)'}; font-weight:700;">${avg.toFixed(1)}</td></tr>`;
+        }).join('')}
+      </table></div>
+    </div>`;
   }
 
   html += `<div class="card"><div class="section-label">Tendencies by Down</div>`;
@@ -1064,7 +1140,26 @@ function renderSetupTab(){
     </div>`;
   }
 
-  let html = `<div class="card" style="border-color:var(--amber);">
+  let html = `<div class="card">
+    <button onclick="toggleHowToGuide()" style="width:100%; display:flex; justify-content:space-between; align-items:center; background:none; border:none; padding:0; cursor:pointer; text-align:left;">
+      <div class="section-label" style="margin-bottom:0;">📋 How to Tag (Student/TA Guide)</div>
+      <span style="color:var(--amber); font-weight:700; font-size:13px;">${state.showHowToGuide ? 'Hide ▲' : 'Show ▼'}</span>
+    </button>
+    ${state.showHowToGuide ? `
+    <div class="hint" style="margin-top:10px;">
+      <b>1. ODK</b> — who has the ball. O = your offense, D = your defense (opponent has it), K = a kicking play, PAT = extra point/2pt attempt. This drives everything else on the screen.<br><br>
+      <b>2. Formation → Play</b> — tap the formation first; if it has plays loaded, a second row of buttons appears for the specific call.<br><br>
+      <b>3. Play Type</b> — Run, Pass, Sack, Penalty (or the kicking equivalents). Required to log a play.<br><br>
+      <b>4. Hash / Direction</b> — where the snap was, and which way the play went. Required. If you didn't catch it, tap <b>"?"</b> — don't guess, and don't leave it blank.<br><br>
+      <b>5. Gain/Loss</b> — yards on the play. Tap a tile or type a custom number. Required.<br><br>
+      <b>6. TD / Turnover / Safety</b> — mark these when they happen. The app automatically handles what comes next (PAT, kickoff, who gets the ball) — you don't need to figure that part out.<br><br>
+      <b>7. Made a mistake?</b> — tap "Undo Last Play" at the bottom of the Tag tab any time. It's safe to use.<br><br>
+      <b>8. Scout mode</b> — if you're tagging film after the game rather than live, switch to Scout mode below. Nothing works differently, it just removes the game-clock urgency from the screen.<br><br>
+      <b>9. Pausing partway through?</b> — nothing here saves itself automatically. Before you stop, go to the Export tab and download or share a CSV checkpoint. If you come back later (even a different day), use "Crash Recovery" on that same tab to load that file back in and keep going exactly where you left off.<br><br>
+      When in doubt: tap "?" instead of guessing, and export before you walk away. That's really it.
+    </div>` : ''}
+  </div>
+  <div class="card" style="border-color:var(--amber);">
     <div class="section-label" style="color:var(--amber);">⚠ The "?" Option</div>
     <div class="hint" style="margin-top:0;">Every field on the Tag tab (Hash, Direction, and every toggleable field below) includes a <b>"?"</b> choice. Use it whenever whoever's tagging didn't see or hear something clearly — it protects the data by making "I don't know" explicit instead of forcing a guess or leaving a gap. A play logged with a "?" somewhere is still far more useful than one silently left blank or wrong.</div>
   </div>
@@ -1093,6 +1188,14 @@ function renderSetupTab(){
     ${toggleRow('Stunt (Y/N)', state.showStunt, "setShowStunt(true)", "setShowStunt(false)")}
     ${toggleRow('Play Call (per Formation)', state.showDefPlay, "setShowDefPlay(true)", "setShowDefPlay(false)")}
     <div class="hint" style="margin-top:0;">When a play is tagged Stunt = YES, a second set of tiles appears to pick the specific stunt/pressure call.</div>
+  </div>
+
+  <div class="card">
+    <div class="section-label">General Toggles</div>
+    <div class="hint" style="margin-top:0;">These apply to every play type (O, D, K, PAT) — off by default since they're extra work on top of tagging. Turn them on only if it's realistic to keep up with during the game; both are free-text so any format works.</div>
+    ${toggleRow('Clock (time remaining)', state.showClock, "setShowClock(true)", "setShowClock(false)")}
+    ${toggleRow('Yard Line (ball position)', state.showYardLine, "setShowYardLine(true)", "setShowYardLine(false)")}
+    <div class="hint" style="margin-top:0;">When either is on, the field is highlighted automatically at the start of a new drive and on any play marked TD — those are the moments it matters most for time-of-possession and scoring context.</div>
   </div>
 
   <div class="card">
@@ -1125,7 +1228,8 @@ function renderSetupTab(){
       Two accepted formats — pick whichever matches what you have:<br>
       1) <code>RB: Name, Name</code> — one position per line.<br>
       2) A plain CSV with rows of <code>Position,Name</code> (a header row is fine, it's auto-skipped).<br>
-      Recognized keys: <b>QB, RB, FB, WR, TE, DEF, K, P</b>. "FB" plays into the same Ball Carrier picker as RB. "DEF" should list anyone eligible for tackle credit (LBs, DL, DBs combined).<br><br>
+      Recognized keys: <b>QB, RB, FB, WR, TE, DEF, K, P</b>. "FB" plays into the same Ball Carrier picker as RB. "DEF" should list anyone eligible for tackle credit (LBs, DL, DBs combined).<br>
+      Want jersey numbers on the buttons? Just include them in the name itself, e.g. <code>RB: 21 Doe, 4 Lee</code> — it'll show and export exactly as typed, no separate field needed.<br><br>
       Have a PDF roster? <a href="${duckUrlPDF}" target="_blank" rel="noopener" style="color:var(--amber); font-weight:700;">Click here!</a>
       &nbsp;&nbsp;·&nbsp;&nbsp;
       Have a text roster (not yet in Position,Name format)? <a href="${duckUrlText}" target="_blank" rel="noopener" style="color:var(--amber); font-weight:700;">Click here!</a>
@@ -1268,7 +1372,10 @@ function renderExportTab(){
 
   html += `<div class="card">
     <div class="section-label">Review &amp; Edit All Plays (${state.plays.length})</div>
-    <div class="hint">Everything here is editable — fix a bad Hudl import, or correct a live-tagged mistake. Changes save immediately as you tab away from a field. Note: editing a play here does <b>not</b> recalculate down/distance for other plays after it — that auto-chain only runs while tagging live on the Tag tab.</div>
+    <div class="hint">Everything here is editable — fix a bad Hudl import, or correct a live-tagged mistake. Changes save immediately as you tab away from a field. Good for fixing Hash, Direction, Formation, Player, and similar fields on any past play without disturbing anything else. <b>Caution:</b> editing TD/Turnover/Safety on an already-logged play does <b>not</b> recompute down/distance/possession for the plays after it — if the mistake is one of those three, it's usually safer to use "Undo Last Play" repeatedly back to that point on the Tag tab instead.</div>
+    <div class="row-btns" style="margin-top:8px;">
+      <button class="btn-secondary" onclick="setTab('tag')">Back to Tagging</button>
+    </div>
     <div style="display:flex; align-items:center; gap:8px; margin-top:8px;">
       <input type="checkbox" id="filterUnknownCheck" ${state.reviewFilterUnknown?'checked':''} onchange="toggleReviewFilterUnknown()">
       <label for="filterUnknownCheck" style="font-size:13px;">Show only rows with a "?" in them (${state.plays.filter(hasUnknownValue).length} found)</label>
@@ -1449,17 +1556,19 @@ function buildGameReportText(){
     const dd = (p.down!=null && p.distance!=null) ? `${p.down} & ${p.distance}` : p.odk;
     const who = p.player || p.passer || p.tackler || '';
     const gainTxt = (p.gain!=null && p.gain!=='') ? `${p.gain} yds` : '';
-    lines.push(`Q${p.quarter} | ${p.odk} | ${dd} | ${p.playType}${who?' — '+who:''} ${gainTxt}${p.isTD?' TOUCHDOWN':''}${p.isSafety?' SAFETY':''}${p.isTurnover?' TURNOVER':''}${p.result?' ('+p.result+')':''}${p.notes?' ['+p.notes+']':''}`.replace(/\s+/g,' ').trim());
+    const clockTxt = p.clock ? `@${p.clock}` : '';
+    const yardTxt = p.yardLine ? `(${p.yardLine})` : '';
+    lines.push(`Q${p.quarter} ${clockTxt} | ${p.odk} | ${dd} ${yardTxt} | ${p.playType}${who?' — '+who:''} ${gainTxt}${p.isTD?' TOUCHDOWN':''}${p.isSafety?' SAFETY':''}${p.isTurnover?' TURNOVER':''}${p.result?' ('+p.result+')':''}${p.notes?' ['+p.notes+']':''}`.replace(/\s+/g,' ').trim());
   });
 
   return lines.join('\n');
 }
 
 function buildCSVString(){
-  const headers = ['ODK','Formation','Play','Down','Distance','Gain','PlayType','Hash','Direction','ToStrength','ToBoundary','ToTE','ToFB','Motion','MotionToStrength','MotionToBoundary','Front','Coverage','Stunt','StuntCall','BallCarrier','Passer','Receiver','Tackler','Result','TD','Turnover','Safety','Notes','InternalODK','PendingReceiver','DrivingSide'];
+  const headers = ['ODK','Formation','Play','Down','Distance','Gain','PlayType','Hash','Direction','ToStrength','ToBoundary','ToTE','ToFB','Motion','MotionToStrength','MotionToBoundary','Front','Coverage','Stunt','StuntCall','Clock','YardLine','BallCarrier','Passer','Receiver','Tackler','Result','TD','Turnover','Safety','Notes','InternalODK','PendingReceiver','DrivingSide'];
   const lines = [headers.join(',')];
   state.plays.forEach(p=>{
-    lines.push([hudlOdk(p),p.formation,p.play,p.down,p.distance,p.gain,p.playType,p.hash,p.direction,p.tostrength,p.toBoundary,p.toTE,p.toFB,p.motion,p.motionToStrength,p.motionToBoundary,p.front,p.coverage,p.stunt,p.stuntCall,p.player,p.passer,p.receiver,p.tackler,p.result,p.isTD?'Y':'',p.isTurnover?'Y':'',p.isSafety?'Y':'',p.notes||'',p.odk,p.pendingReceiver||'',p.drivingSide||''].map(csvEscape).join(','));
+    lines.push([hudlOdk(p),p.formation,p.play,p.down,p.distance,p.gain,p.playType,p.hash,p.direction,p.tostrength,p.toBoundary,p.toTE,p.toFB,p.motion,p.motionToStrength,p.motionToBoundary,p.front,p.coverage,p.stunt,p.stuntCall,p.clock,p.yardLine,p.player,p.passer,p.receiver,p.tackler,p.result,p.isTD?'Y':'',p.isTurnover?'Y':'',p.isSafety?'Y':'',p.notes||'',p.odk,p.pendingReceiver||'',p.drivingSide||''].map(csvEscape).join(','));
   });
   return lines.join('\n');
 }
@@ -1791,8 +1900,8 @@ function importCSV(inputEl){
       const down = c[3]!==undefined && c[3]!=='' ? parseInt(c[3]) : null;
       const distance = c[4]!==undefined && c[4]!=='' ? parseInt(c[4]) : null;
       return {
-        // c[29] (InternalODK) preserves 'PAT' distinctly from the Hudl-mapped 'K' in c[0]; fall back to c[0] for older exports.
-        odk: c[29] || c[0] || '',
+        // c[31] (InternalODK) preserves 'PAT' distinctly from the Hudl-mapped 'K' in c[0]; fall back to c[0] for older exports.
+        odk: c[31] || c[0] || '',
         formation:c[1]||'', play:c[2]||'',
         down: isNaN(down) ? null : down,
         distance: isNaN(distance) ? null : distance,
@@ -1801,11 +1910,12 @@ function importCSV(inputEl){
         toBoundary:c[10]||'', toTE:c[11]||'', toFB:c[12]||'',
         motion:c[13]||'', motionToStrength:c[14]||'', motionToBoundary:c[15]||'',
         front:c[16]||'', coverage:c[17]||'', stunt:c[18]||'', stuntCall:c[19]||'',
-        player:c[20]||'', passer:c[21]||'', receiver:c[22]||'', tackler:c[23]||'',
-        result:c[24]||'', isTD: c[25]==='Y', isTurnover: c[26]==='Y', isSafety: c[27]==='Y',
-        notes: c[28] || '',
-        pendingReceiver: c[30] || null,
-        drivingSide: c[31] || null,
+        clock:c[20]||'', yardLine:c[21]||'',
+        player:c[22]||'', passer:c[23]||'', receiver:c[24]||'', tackler:c[25]||'',
+        result:c[26]||'', isTD: c[27]==='Y', isTurnover: c[28]==='Y', isSafety: c[29]==='Y',
+        notes: c[30] || '',
+        pendingReceiver: c[32] || null,
+        drivingSide: c[33] || null,
       };
     });
     state.plays = restored;
