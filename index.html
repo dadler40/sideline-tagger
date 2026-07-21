@@ -136,6 +136,7 @@
       </div>
       <div class="sb-sub" id="sbSub">Play 1 &middot; No plays logged yet</div>
       <div id="sbDriveFlag" style="font-family:'SFMono-Regular',Menlo,monospace; font-size:12px; color:var(--amber); font-weight:700; margin-top:2px;"></div>
+      <button class="undo-btn" id="sbFieldDirBtn" style="width:auto; padding:4px 10px; margin-top:6px; font-size:11px;" onclick="toggleFieldDirection()"></button>
     </div>
     <div style="text-align:right;">
       <div class="sb-score" id="sbTeamStats">0 yds &middot; 0 TD &middot; 0 TO</div>
@@ -167,6 +168,7 @@ const KICK_PLAY_TYPES = ["Punt","Kickoff","FG","Onside"];
 const PAT_PLAY_TYPES = ["PAT Kick","2pt Run","2pt Pass"];
 const NOTABLE_EVENTS = [
   "Bad Snap",
+  "Fumble Lost",
   "Fumble Recovered by Offense",
   "Blocked Punt",
   "Blocked FG/PAT",
@@ -179,6 +181,16 @@ const NOTABLE_EVENTS = [
 ];
 
 // Stunt/pressure calls, conditional on which Front is in (30 vs 40 front have different vocabularies).
+// Common WI HS football fouls, most-frequent ones up top per the reference app's design.
+const PENALTY_FOUL_TYPES = [
+  "Holding (Offense)","Holding (Defense)","False Start","Offside/Encroachment",
+  "Pass Interference (Offense)","Pass Interference (Defense)","Personal Foul",
+  "Unsportsmanlike Conduct","Facemask","Roughing the Passer","Roughing the Kicker",
+  "Delay of Game","Illegal Motion/Formation","Illegal Block/Chop Block",
+  "Intentional Grounding","Ineligible Man Downfield","Targeting",
+  "?","Other (type below)",
+];
+const PENALTY_RESULTS = ["5 Yards","10 Yards","15 Yards","Loss of Down","Automatic First Down","Offsetting","Declined","No Play","?"];
 const STUNTS_30 = ["Strong","Slant","Pinch","Saw","Storm","Mow","?","Other (type below)"];
 const STUNTS_40 = ["Base","Pinch","Bump","Slant","Flex","Alpha","Fist","Storm","Saw","Mike","Mow","Bear","Show Bear","Cross Bear","Axe Sam","Whip","4","?","Other (type below)"];
 const STUNTS_FALLBACK = ["?","Other (type below)"]; // used when Front is 50 or not yet selected
@@ -194,6 +206,10 @@ const state = {
     P: ["Tommy Check"],
     DEF: ["Ben Spears","Jameson Degenhardt"],
   },
+  oppRoster: {}, // { "RB": ["3 David Irvin", ...], "QB":[...], "WR":[...] } -- editable each week, opponent's own players
+  schedule: [], // [{opponent, date}, ...] -- season schedule, one tap to start a new game from this list
+  pendingNewGameIndex: null,
+  confirmingNewGame: false,
   playbook: {},      // { "Formation Name": ["Play A","Play B"] } -- OFFENSIVE formations/plays
   // Placeholder plays per defensive formation -- swap these for real calls whenever ready.
   defPlaybook: {
@@ -219,9 +235,12 @@ const state = {
   nextSituation: { mode:'dd', down:1, distance:10, forcedOdk:null },
   lastActionNote: '',  // shown as a dismissible banner after an auto-transition
   teamName: 'Logan',
+  ourColor: '#E3002B',
+  oppColor: '#5B2C82',
   opponentName: 'Opponent',
   gameDate: '',
   quarter: '1',
+  fieldDirection: 'right', // 'right' = our offense driving left-to-right on screen, 'left' = right-to-left
   showToStrength: true,
   showToBoundary: true,
   showToTE: true,
@@ -234,6 +253,7 @@ const state = {
   showClock: false,
   showYardLine: false,
   showHowToGuide: false,
+  repeatLastFields: { formation: true, hash: true, direction: true, strength: true },
   showCoverage: true,
   showStunt: true,
   showDefPlay: true,
@@ -393,6 +413,70 @@ function loadRoster(){
   state.roster = detectRosterFormat(text)==='label' ? parseKeyList(text) : parseRosterCSV(text);
   render();
 }
+function loadOppRoster(){
+  const text = document.getElementById('oppRosterInput').value;
+  state.oppRoster = detectRosterFormat(text)==='label' ? parseKeyList(text) : parseRosterCSV(text);
+  render();
+}
+
+// ---- Season Schedule: "Opponent @ Date" per line ----
+function parseSchedule(text){
+  return text.split('\n').map(l=>l.trim()).filter(Boolean).map(line=>{
+    const parts = line.split('@').map(s=>s.trim());
+    return { opponent: parts[0] || '', date: parts[1] || '' };
+  }).filter(g=>g.opponent);
+}
+function loadSchedule(){
+  state.schedule = parseSchedule(document.getElementById('scheduleInput').value);
+  render();
+}
+function clearSchedule(){ state.schedule = []; document.getElementById('scheduleInput').value=''; render(); }
+function saveScheduleToFile(){
+  const payload = JSON.stringify({ schedule: state.schedule }, null, 2);
+  const blob = new Blob([payload], {type:'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'season_schedule.json';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+function loadScheduleFromFile(inputEl){
+  const file = inputEl.files[0];
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const saved = JSON.parse(e.target.result);
+      if(Array.isArray(saved.schedule)){
+        state.schedule = saved.schedule;
+        document.getElementById('scheduleInput').value = state.schedule.map(g=>`${g.opponent} @ ${g.date}`).join('\n');
+        render();
+      } else { alert('That file does not look like a saved schedule.'); }
+    } catch(err){ alert('Could not read that schedule file.'); }
+  };
+  reader.readAsText(file);
+}
+
+// ---- Start New Game: picks an opponent from the schedule, resets for a fresh game ----
+function requestStartNewGame(index){ state.pendingNewGameIndex = index; state.confirmingNewGame = true; render(); }
+function cancelStartNewGame(){ state.confirmingNewGame = false; render(); }
+function confirmStartNewGame(){
+  const game = state.schedule[state.pendingNewGameIndex];
+  if(game){
+    state.opponentName = game.opponent;
+    state.gameDate = game.date;
+  }
+  state.oppRoster = {};
+  state.plays = [];
+  state.quarter = '1';
+  state.nextSituation = { mode:'dd', down: state.manualDown, distance: state.manualDistance, forcedOdk: null };
+  state.cur = {};
+  state.lastExportAt = 0;
+  state.lastActionNote = '';
+  state.confirmingNewGame = false;
+  render();
+}
+function clearOppRoster(){ state.oppRoster = {}; document.getElementById('oppRosterInput').value=''; render(); }
 
 function toggleFavorite(name){
   state.favorites[name] = !state.favorites[name];
@@ -428,6 +512,8 @@ function handleFileUpload(inputEl, targetTextareaId){
     // Auto-load immediately -- previously this just filled the text box and silently
     // did nothing until "Load Roster"/"Load Playbook" was clicked separately.
     if(targetTextareaId === 'rosterInput') loadRoster();
+    else if(targetTextareaId === 'oppRosterInput') loadOppRoster();
+    else if(targetTextareaId === 'scheduleInput') loadSchedule();
     else if(targetTextareaId === 'playbookInput') loadPlaybook();
     else if(targetTextareaId === 'defPlaybookInput') loadDefPlaybook();
   };
@@ -456,6 +542,7 @@ function selectField(field, value){
   if(field === 'notableEvent' && state.cur.notableEvent !== 'Other (type below)') delete state.cur.notableEventOther;
   if(field === 'stunt' && state.cur.stunt !== 'YES'){ delete state.cur.stuntCall; delete state.cur.stuntCallOther; }
   if(field === 'stuntCall' && state.cur.stuntCall !== 'Other (type below)') delete state.cur.stuntCallOther;
+  if(field === 'foulType' && state.cur.foulType !== 'Other (type below)') delete state.cur.foulTypeOther;
   render();
 }
 
@@ -463,11 +550,25 @@ function setGain(val){ state.cur.gain = val; render(); }
 function toggleTD(){ state.cur.isTD = !state.cur.isTD; render(); }
 function toggleTO(){ state.cur.isTurnover = !state.cur.isTurnover; render(); }
 function toggleSafety(){ state.cur.isSafety = !state.cur.isSafety; render(); }
+// Dedicated Fumble quick-actions -- Lost is a real turnover (auto-flips possession via
+// the same logic as any other turnover); Recovered means the offense kept it, no flip.
+function quickFumbleLost(){
+  if(state.cur.notableEvent === 'Fumble Lost'){ delete state.cur.notableEvent; state.cur.isTurnover = false; }
+  else { state.cur.notableEvent = 'Fumble Lost'; state.cur.isTurnover = true; }
+  render();
+}
+function quickFumbleRecovered(){
+  if(state.cur.notableEvent === 'Fumble Recovered by Offense'){ delete state.cur.notableEvent; }
+  else { state.cur.notableEvent = 'Fumble Recovered by Offense'; state.cur.isTurnover = false; }
+  render();
+}
 function setQuarter(q){ state.quarter = q; render(); }
 function saveGameInfo(){
   state.teamName = document.getElementById('teamNameInput').value.trim() || 'Logan';
   state.opponentName = document.getElementById('opponentNameInput').value.trim() || 'Opponent';
   state.gameDate = document.getElementById('gameDateInput').value.trim();
+  state.ourColor = document.getElementById('ourColorInput').value;
+  state.oppColor = document.getElementById('oppColorInput').value;
   render();
 }
 
@@ -509,15 +610,24 @@ function predictNextHash(prevHash, direction){
 // run the same look back-to-back. Deliberately leaves Play Type and Gain blank -- those
 // describe THIS snap's outcome and should always be entered fresh. Hash is predicted rather
 // than copied, since the ball's actual field position shifts based on the previous play's direction.
+// Which categories actually get copied is controlled by the checkboxes above the button.
 function repeatLast(){
   const lp = lastMeaningfulPlay();
   if(!lp) return;
-  ['odk','formation','play','direction','tostrength','toBoundary','toTE','toFB'].forEach(f=>{
-    if(lp[f]) state.cur[f] = lp[f];
-  });
-  if(lp.hash) state.cur.hash = predictNextHash(lp.hash, lp.direction);
+  const f = state.repeatLastFields;
+  state.cur.odk = lp.odk; // possession side always carries forward -- not optional
+  if(f.formation){
+    if(lp.formation) state.cur.formation = lp.formation;
+    if(lp.play) state.cur.play = lp.play;
+  }
+  if(f.direction && lp.direction) state.cur.direction = lp.direction;
+  if(f.strength){
+    ['tostrength','toBoundary','toTE','toFB'].forEach(k=>{ if(lp[k]) state.cur[k] = lp[k]; });
+  }
+  if(f.hash && lp.hash) state.cur.hash = predictNextHash(lp.hash, lp.direction);
   render();
 }
+function toggleRepeatLastField(key){ state.repeatLastFields[key] = !state.repeatLastFields[key]; render(); }
 
 function canLog(){
   if(!state.cur.odk || !state.cur.playType) return false;
@@ -530,6 +640,12 @@ function logPlay(){
   if(!canLog()) return;
   const ns = state.nextSituation;
   const isSpecialRow = state.cur.odk === 'PAT';
+  // Standalone kicking plays (not already part of the TD->PAT->Kickoff chain) previously had no
+  // way to know who receives afterward. "Kicking Team" fixes that: if "Us" kicks, the opponent (D)
+  // receives; if "Opponent" kicks, we (O) receive.
+  const explicitPendingReceiver = (['Kickoff','Onside','Punt'].includes(state.cur.playType) && (state.cur.kickingTeam === 'Us' || state.cur.kickingTeam === 'Opponent'))
+    ? (state.cur.kickingTeam === 'Us' ? 'D' : 'O')
+    : null;
   const row = {
     odk: state.cur.odk,
     formation: state.cur.formation || '',
@@ -551,6 +667,11 @@ function logPlay(){
     coverage: state.cur.coverage || '',
     stunt: state.cur.stunt || '',
     stuntCall: state.cur.stuntCall === 'Other (type below)' ? (state.cur.stuntCallOther || '') : (state.cur.stuntCall || ''),
+    foulBy: state.cur.foulBy || '',
+    foulType: state.cur.foulType === 'Other (type below)' ? (state.cur.foulTypeOther || '') : (state.cur.foulType || ''),
+    penaltyResult: state.cur.penaltyResult || '',
+    spotOfFoul: state.cur.spotOfFoul || '',
+    kickingTeam: state.cur.kickingTeam || '',
     clock: state.cur.clock || '',
     yardLine: state.cur.yardLine || '',
     result: state.cur.result || '',
@@ -563,7 +684,7 @@ function logPlay(){
     isSafety: !!state.cur.isSafety,
     notableEvent: state.cur.notableEvent || '',
     notes: state.cur.notableEvent === 'Other (type below)' ? (state.cur.notableEventOther || '') : (state.cur.notableEvent || ''),
-    pendingReceiver: ns.pendingReceiver || null, // carried forward through PAT -> Kickoff
+    pendingReceiver: ns.pendingReceiver || explicitPendingReceiver || null, // auto-chain, else Kicking Team selection
     quarter: state.quarter,
     // The O/D side actually driving this play, even for K/PAT rows where odk itself doesn't say which side is kicking.
     // Prefer the freshest signal (what forced this row's ODK) over searching backward through history.
@@ -643,13 +764,15 @@ function endQ2(){
     const secondHalfReceiver = flipOdk(opener);
     state.nextSituation = { mode:'dd', down:1, distance:10, forcedOdk: secondHalfReceiver };
     state.cur = { odk: secondHalfReceiver };
-    state.lastActionNote = `Halftime — ${secondHalfReceiver} receives to start the 2nd half, 1st & 10.`;
+    state.lastActionNote = `Halftime — ${secondHalfReceiver} receives to start the 2nd half, 1st & 10. Field direction flipped since teams switch ends.`;
   } else {
     state.lastActionNote = 'Halftime — no plays logged yet, so the 2nd-half receiver could not be determined automatically.';
   }
+  state.fieldDirection = state.fieldDirection === 'right' ? 'left' : 'right'; // teams switch ends at halftime
   state.quarter='3';
   render();
 }
+function toggleFieldDirection(){ state.fieldDirection = state.fieldDirection === 'right' ? 'left' : 'right'; render(); }
 function endQ3(){ state.quarter='4'; state.lastActionNote='End of Q3 — now Q4.'; render(); }
 function endGame(){
   state.lastActionNote = 'Game ended — check Export for the final box score.';
@@ -688,9 +811,13 @@ function renderTagTab(){
   const formationKeys = Object.keys(activePlaybook).length ? Object.keys(activePlaybook) : defaultFormationList;
   const plays = state.cur.formation && activePlaybook[state.cur.formation] ? activePlaybook[state.cur.formation] : null;
 
-  const rbList = sortedWithFavorites([...(state.roster['RB']||[]), ...(state.roster['FB']||[])]);
-  const qbList = sortedWithFavorites(state.roster['QB']) || null;
-  const wrList = sortedWithFavorites([...(state.roster['WR']||[]), ...(state.roster['TE']||[])]);
+  // On Defense snaps, the ball carrier/passer/receiver is an OPPONENT player, not ours --
+  // pull from the opponent roster there. Tackle Credit stays our own DEF roster always,
+  // since we're the ones making the tackle regardless of who's on offense.
+  const ballCarrierRoster = isDefense ? state.oppRoster : state.roster;
+  const rbList = sortedWithFavorites([...(ballCarrierRoster['RB']||[]), ...(ballCarrierRoster['FB']||[])]);
+  const qbList = sortedWithFavorites(ballCarrierRoster['QB']) || null;
+  const wrList = sortedWithFavorites([...(ballCarrierRoster['WR']||[]), ...(ballCarrierRoster['TE']||[])]);
   const defList = sortedWithFavorites(state.roster['DEF']) || null;
   const kList = sortedWithFavorites(state.roster['K']) || null;
   const pList = sortedWithFavorites(state.roster['P'] || state.roster['K']) || null;
@@ -707,7 +834,17 @@ function renderTagTab(){
   }
 
   if(lastMeaningfulPlay()){
-    html += `<button class="undo-btn" style="width:100%; color:var(--text); margin-bottom:12px;" onclick="repeatLast()">&#8635; Repeat Last (Formation/Hash/Direction/Strength)</button>`;
+    const rl = state.repeatLastFields;
+    html += `<div class="card" style="padding:10px 14px;">
+      <div style="font-size:11px; letter-spacing:.1em; text-transform:uppercase; color:var(--muted); font-weight:700; margin-bottom:8px;">Repeat Last — what to carry forward</div>
+      <div style="display:flex; flex-wrap:wrap; gap:12px; margin-bottom:10px;">
+        <label style="display:flex; align-items:center; gap:5px; font-size:13px;"><input type="checkbox" ${rl.formation?'checked':''} onchange="toggleRepeatLastField('formation')"> Formation</label>
+        <label style="display:flex; align-items:center; gap:5px; font-size:13px;"><input type="checkbox" ${rl.hash?'checked':''} onchange="toggleRepeatLastField('hash')"> Hash</label>
+        <label style="display:flex; align-items:center; gap:5px; font-size:13px;"><input type="checkbox" ${rl.direction?'checked':''} onchange="toggleRepeatLastField('direction')"> Direction</label>
+        <label style="display:flex; align-items:center; gap:5px; font-size:13px;"><input type="checkbox" ${rl.strength?'checked':''} onchange="toggleRepeatLastField('strength')"> Strength</label>
+      </div>
+      <button class="undo-btn" style="width:100%; color:var(--text); margin:0;" onclick="repeatLast()">&#8635; Repeat Last</button>
+    </div>`;
   }
 
   html += `<div class="card">
@@ -762,20 +899,39 @@ function renderTagTab(){
     } else {
       const showStats = state.contentMode !== 'tag';
       const showTags = state.contentMode !== 'stats';
-      if(showStats && isOffense && state.cur.playType === 'Run' && rbList.length){
-        html += tileSection('Ball Carrier', [...rbList,'Other'], 'player', 'small');
+      const ballCarrierLabel = isDefense ? 'Ball Carrier (Opponent)' : 'Ball Carrier';
+      const passerLabel = isDefense ? 'Passer (Opponent)' : 'Passer';
+      const receiverLabel = isDefense ? 'Receiver (Opponent, leave blank if incomplete)' : 'Receiver (leave blank if incomplete)';
+      if(showStats && (isOffense || isDefense) && state.cur.playType === 'Run' && rbList.length){
+        html += tileSection(ballCarrierLabel, [...rbList,'Other'], 'player', 'small');
       }
-      if(showStats && isOffense && (state.cur.playType === 'Pass' || state.cur.playType === 'Sack')){
-        if(qbList) html += tileSection('Passer', [...qbList,'Other'], 'passer', 'small');
-        if(state.cur.playType === 'Pass' && wrList.length) html += tileSection('Receiver (leave blank if incomplete)', [...wrList,'Other'], 'receiver', 'small');
+      if(showStats && (isOffense || isDefense) && (state.cur.playType === 'Pass' || state.cur.playType === 'Sack')){
+        if(qbList) html += tileSection(passerLabel, [...qbList,'Other'], 'passer', 'small');
+        if(state.cur.playType === 'Pass' && wrList.length) html += tileSection(receiverLabel, [...wrList,'Other'], 'receiver', 'small');
       }
       if(showStats && isDefense && defList && state.showTackleCredit){
         html += tileSection('Tackle Credit', [...defList,'Other'], 'tackler', 'small');
       }
       if(isKicking){
+        if(['Kickoff','Onside','Punt'].includes(state.cur.playType)){
+          html += tileSection('Kicking Team', ['Us','Opponent','?'], 'kickingTeam', 'small');
+        }
         if(showStats && (state.cur.playType==='Kickoff'||state.cur.playType==='FG') && kList) html += tileSection('Kicker', [...kList,'Other'], 'player', 'small');
         if(showStats && state.cur.playType==='Punt' && pList) html += tileSection('Punter', [...pList,'Other'], 'player', 'small');
         if(state.cur.playType==='FG') html += tileSection('Result', ['Good','No Good'], 'result', '');
+      }
+
+      if(state.cur.playType === 'Penalty'){
+        html += tileSection('Foul By', ['Offense','Defense','?'], 'foulBy', 'small');
+        html += tileSection('Foul Type', PENALTY_FOUL_TYPES, 'foulType', 'small');
+        if(state.cur.foulType === 'Other (type below)'){
+          html += `<input type="text" id="foulTypeOther" value="${escAttr(state.cur.foulTypeOther||'')}" placeholder="Describe the foul" style="width:100%; margin-bottom:12px; padding:12px; border-radius:10px; border:1px solid var(--line); background:var(--panel); color:var(--text); font-size:14px;" onchange="state.cur.foulTypeOther=this.value;">`;
+        }
+        html += tileSection('Result', PENALTY_RESULTS, 'penaltyResult', 'small');
+        html += `<div class="card">
+          <div class="section-label">Spot of Foul <span style="font-weight:400; color:var(--muted); text-transform:none;">(optional)</span></div>
+          <input type="text" value="${escAttr(state.cur.spotOfFoul||'')}" placeholder="e.g. OWN 35" style="width:100%; padding:12px; border-radius:10px; border:1px solid var(--line); background:var(--panel); color:var(--text); font-size:14px;" onchange="state.cur.spotOfFoul=this.value;">
+        </div>`;
       }
 
       if(showTags){
@@ -828,6 +984,10 @@ function renderTagTab(){
           <button class="toggle ${state.cur.isTD?'on-td':''}" onclick="toggleTD()">${state.cur.isTD?'TD ✓':'Mark as TD'}</button>
           <button class="toggle ${state.cur.isTurnover?'on-to':''}" onclick="toggleTO()">${state.cur.isTurnover?'Turnover ✓ (+ on downs)':'Mark as Turnover (+ on downs)'}</button>
           <button class="toggle ${state.cur.isSafety?'on-to':''}" onclick="toggleSafety()">${state.cur.isSafety?'Safety ✓':'Mark as Safety'}</button>
+        </div>
+        <div class="toggle-row" style="margin-top:8px;">
+          <button class="toggle ${state.cur.notableEvent==='Fumble Lost'?'on-to':''}" onclick="quickFumbleLost()">${state.cur.notableEvent==='Fumble Lost'?'Fumble — Lost ✓':'Fumble — Lost'}</button>
+          <button class="toggle ${state.cur.notableEvent==='Fumble Recovered by Offense'?'on-td':''}" onclick="quickFumbleRecovered()">${state.cur.notableEvent==='Fumble Recovered by Offense'?'Fumble — Recovered ✓':'Fumble — Recovered'}</button>
         </div>
       </div>`;
 
@@ -940,8 +1100,10 @@ function renderTendenciesTab(){
 
     html += `<div class="card" style="border-color:var(--amber); background:var(--amber-dim);">
       <div class="section-label" style="color:var(--amber);">Head Coach Glance</div>
-      <div style="font-family:'SFMono-Regular',Menlo,monospace; font-size:28px; font-weight:800; color:var(--text); margin:4px 0;">
-        ${escAttr(state.teamName)} ${scoring.yourScore} — ${scoring.oppScore} ${escAttr(state.opponentName)}
+      <div style="font-family:'SFMono-Regular',Menlo,monospace; font-size:28px; font-weight:800; margin:4px 0;">
+        <span style="color:${state.ourColor};">${escAttr(state.teamName)} ${scoring.yourScore}</span>
+        <span style="color:var(--muted);"> — </span>
+        <span style="color:${state.oppColor};">${scoring.oppScore} ${escAttr(state.opponentName)}</span>
       </div>
       <div style="font-size:14px; color:var(--muted); margin-bottom:8px;">${total} plays under this filter</div>
       ${headlines.length ? `<div style="font-size:20px; font-weight:800; color:var(--amber);">${headlines.join('  ·  ')}</div>` : ''}
@@ -1124,7 +1286,7 @@ function renderBoxScoreTab(){
 
 // ---------------- RENDER: SETUP TAB ----------------
 function renderSetupTab(){
-  const allNames = [...new Set(Object.values(state.roster).flat())];
+  const allNames = [...new Set([...Object.values(state.roster).flat(), ...Object.values(state.oppRoster).flat()])];
   const duckPromptPDF = "Make this pdf roster a csv, using same player order as the PDF";
   const duckUrlPDF = "https://duckduckgo.com/?ia=chat&q=" + encodeURIComponent(duckPromptPDF);
   const duckPromptText = "Make this text roster a csv, using same player order as listed";
@@ -1206,8 +1368,48 @@ function renderSetupTab(){
       <input type="text" id="opponentNameInput" value="${escAttr(state.opponentName)}" placeholder="Opponent name" style="flex:1; padding:12px; border-radius:10px; border:1px solid var(--line); background:var(--panel); color:var(--text); font-size:14px;">
     </div>
     <input type="text" id="gameDateInput" value="${escAttr(state.gameDate)}" placeholder="Game date (e.g. 8/28/25)" style="width:100%; padding:12px; border-radius:10px; border:1px solid var(--line); background:var(--panel); color:var(--text); font-size:14px; margin-bottom:8px;">
+    <div style="display:flex; gap:16px; align-items:center; margin-bottom:8px;">
+      <label style="display:flex; align-items:center; gap:8px; font-size:13px;">Our Color <input type="color" id="ourColorInput" value="${state.ourColor}" style="width:44px; height:32px; border:none; border-radius:6px; padding:0;"></label>
+      <label style="display:flex; align-items:center; gap:8px; font-size:13px;">Opponent Color <input type="color" id="oppColorInput" value="${state.oppColor}" style="width:44px; height:32px; border:none; border-radius:6px; padding:0;"></label>
+    </div>
+    <div class="hint" style="margin-top:0;">Our color defaults to Logan's lipstick red. Opponent color is just for the week — set it however (ask, guess, or look up the school), it doesn't affect anything besides the score display below.</div>
     <button class="btn-primary" style="width:100%;" onclick="saveGameInfo()">Save Game Info</button>
   </div>
+
+  <div class="card">
+    <div class="section-label">Season Schedule</div>
+    <div class="hint">One game per line: <code>Opponent @ Date</code>, e.g. <code>Onalaska Hilltoppers @ 8/28/26</code>. Load it once, then use "Start New Game" below to pick a week with one tap instead of retyping the opponent every time.</div>
+    <input type="file" accept=".txt,.csv" onchange="handleFileUpload(this,'scheduleInput')" style="margin-bottom:8px; color:var(--muted); font-size:12px;">
+    <textarea id="scheduleInput" placeholder="Onalaska Hilltoppers @ 8/28/26&#10;West Salem @ 9/4/26">${state.schedule.map(g=>`${g.opponent} @ ${g.date}`).join('\n')}</textarea>
+    <div class="row-btns" style="margin-top:8px;">
+      <button class="btn-primary" onclick="loadSchedule()">Load Schedule</button>
+      <button class="btn-secondary" onclick="clearSchedule()">Clear</button>
+    </div>
+    <div class="hint" style="margin-top:8px;">This doesn't save itself between sessions — save it to a file once, then reload that file at the start of each new session instead of retyping the whole season.</div>
+    <div class="row-btns">
+      <button class="btn-secondary" onclick="saveScheduleToFile()">Save Schedule to File</button>
+      <label class="btn-secondary" style="text-align:center; cursor:pointer;">Load Schedule File
+        <input type="file" accept=".json" onchange="loadScheduleFromFile(this)" style="display:none;">
+      </label>
+    </div>
+  </div>
+
+  <div class="card" ${state.confirmingNewGame ? 'style="border-color:var(--amber);"' : ''}>
+    <div class="section-label">Start New Game</div>
+    ${state.confirmingNewGame ? `
+    <div class="hint" style="margin-top:0; color:var(--amber);">Start "${escAttr((state.schedule[state.pendingNewGameIndex]||{}).opponent||'')}"? This clears the Opponent Roster and every play logged so far — export a CSV first if you haven't already and need this game's data.</div>
+    <div class="row-btns">
+      <button class="btn-primary" onclick="confirmStartNewGame()">Yes, Start New Game</button>
+      <button class="btn-secondary" onclick="cancelStartNewGame()">Cancel</button>
+    </div>
+    ` : (state.schedule.length ? `
+    <div class="hint" style="margin-top:0;">Tap this week's opponent to set it as the game, clear last week's opponent roster, and start a clean play log.</div>
+    <div class="grid">
+      ${state.schedule.map((g,i)=>`<button class="tile small" onclick="requestStartNewGame(${i})">${escAttr(g.opponent)}${g.date?' ('+escAttr(g.date)+')':''}</button>`).join('')}
+    </div>
+    ` : `<div class="hint" style="margin-top:0;">Load your season schedule above to pick a game with one tap — or just fill in Game Info manually above, that still works fine without a schedule.</div>`)}
+  </div>
+
   <div class="card">
     <div class="section-label">Mode</div>
     <div class="hint">Mode: <b>Live</b> is for tagging during the game (urgent framing, export reminders). <b>Scout</b> is for reviewing film after the fact — no clock pressure, calmer framing. All features work the same in both; this just changes tone/emphasis.</div>
@@ -1223,7 +1425,7 @@ function renderSetupTab(){
     </div>
   </div>
   <div class="card">
-    <div class="section-label">Roster (drives player pickers)</div>
+    <div class="section-label">Our Roster (drives player pickers on Offense)</div>
     <div class="hint">
       Two accepted formats — pick whichever matches what you have:<br>
       1) <code>RB: Name, Name</code> — one position per line.<br>
@@ -1241,11 +1443,24 @@ function renderSetupTab(){
       <button class="btn-primary" onclick="loadRoster()">Load Roster</button>
       <button class="btn-secondary" onclick="clearRoster()">Clear</button>
     </div>
+  </div>
+
+  <div class="card">
+    <div class="section-label">Opponent Roster (drives player pickers on Defense)</div>
+    <div class="hint">
+      Their players — reset this each week. When you tag a Defense (D) snap, Ball Carrier/Passer/Receiver pull from here instead of your own roster, since that's whoever actually touched the ball against you.<br>
+      Same two formats as Our Roster above. Recognized keys: <b>QB, RB, FB, WR, TE</b> (no DEF needed — their defensive players aren't tracked here).
+    </div>
+    <input type="file" accept=".txt,.csv" onchange="handleFileUpload(this,'oppRosterInput')" style="margin-bottom:8px; color:var(--muted); font-size:12px;">
+    <textarea id="oppRosterInput" placeholder="QB: 8 Smith&#10;RB: 21 Doe, 4 Lee&#10;WR: 12 Jones">${Object.keys(state.oppRoster).map(k=>`${k}: ${state.oppRoster[k].join(', ')}`).join('\n')}</textarea>
+    <div class="row-btns" style="margin-top:8px;">
+      <button class="btn-primary" onclick="loadOppRoster()">Load Opponent Roster</button>
+      <button class="btn-secondary" onclick="clearOppRoster()">Clear</button>
+    </div>
   </div>`;
 
   if(allNames.length){
-    html += `<div class="card">
-      <div class="section-label">Favorites (shown first in dropdowns)</div>
+    html += `<div class="card">      <div class="section-label">Favorites (shown first in dropdowns)</div>
       <div class="hint">Tap a name to mark it a favorite — likely-to-touch-the-ball players (your varsity-relevant kids, not the whole JV roster) will then sort to the top of every picker instead of getting buried in a long list.</div>
       <div>${allNames.map(n=>`<button class="fav-chip ${state.favorites[n]?'fav':''}" data-name="${escAttr(n)}" onclick="toggleFavorite(this.dataset.name)">${state.favorites[n]?'⭐ ':''}${escAttr(n)}</button>`).join('')}</div>
     </div>`;
@@ -1565,10 +1780,10 @@ function buildGameReportText(){
 }
 
 function buildCSVString(){
-  const headers = ['ODK','Formation','Play','Down','Distance','Gain','PlayType','Hash','Direction','ToStrength','ToBoundary','ToTE','ToFB','Motion','MotionToStrength','MotionToBoundary','Front','Coverage','Stunt','StuntCall','Clock','YardLine','BallCarrier','Passer','Receiver','Tackler','Result','TD','Turnover','Safety','Notes','InternalODK','PendingReceiver','DrivingSide'];
+  const headers = ['ODK','Formation','Play','Down','Distance','Gain','PlayType','Hash','Direction','ToStrength','ToBoundary','ToTE','ToFB','Motion','MotionToStrength','MotionToBoundary','Front','Coverage','Stunt','StuntCall','FoulBy','FoulType','PenaltyResult','SpotOfFoul','KickingTeam','Clock','YardLine','BallCarrier','Passer','Receiver','Tackler','Result','TD','Turnover','Safety','Notes','InternalODK','PendingReceiver','DrivingSide'];
   const lines = [headers.join(',')];
   state.plays.forEach(p=>{
-    lines.push([hudlOdk(p),p.formation,p.play,p.down,p.distance,p.gain,p.playType,p.hash,p.direction,p.tostrength,p.toBoundary,p.toTE,p.toFB,p.motion,p.motionToStrength,p.motionToBoundary,p.front,p.coverage,p.stunt,p.stuntCall,p.clock,p.yardLine,p.player,p.passer,p.receiver,p.tackler,p.result,p.isTD?'Y':'',p.isTurnover?'Y':'',p.isSafety?'Y':'',p.notes||'',p.odk,p.pendingReceiver||'',p.drivingSide||''].map(csvEscape).join(','));
+    lines.push([hudlOdk(p),p.formation,p.play,p.down,p.distance,p.gain,p.playType,p.hash,p.direction,p.tostrength,p.toBoundary,p.toTE,p.toFB,p.motion,p.motionToStrength,p.motionToBoundary,p.front,p.coverage,p.stunt,p.stuntCall,p.foulBy,p.foulType,p.penaltyResult,p.spotOfFoul,p.kickingTeam,p.clock,p.yardLine,p.player,p.passer,p.receiver,p.tackler,p.result,p.isTD?'Y':'',p.isTurnover?'Y':'',p.isSafety?'Y':'',p.notes||'',p.odk,p.pendingReceiver||'',p.drivingSide||''].map(csvEscape).join(','));
   });
   return lines.join('\n');
 }
@@ -1595,7 +1810,11 @@ function buildDataDictionaryText(){
   lines.push('Stunt — was a stunt/pressure run? YES / NO / ?');
   lines.push('StuntCall — the specific call. 30-front calls: ' + STUNTS_30.filter(s=>s!=='?'&&s!=='Other (type below)').join(', ') + '.');
   lines.push('  40-front calls: ' + STUNTS_40.filter(s=>s!=='?'&&s!=='Other (type below)').join(', ') + '.');
-  lines.push('BallCarrier / Passer / Receiver / Tackler — player names from the roster, or "Other" if not on the list.');
+  lines.push('FoulBy — Offense or Defense (which side committed the penalty), or ?');
+  lines.push('FoulType — the specific foul. Common ones: ' + PENALTY_FOUL_TYPES.filter(s=>s!=='?'&&s!=='Other (type below)').join(', ') + '.');
+  lines.push('PenaltyResult — 5/10/15 Yards, Loss of Down, Automatic First Down, Offsetting, Declined, No Play, or ?');
+  lines.push('SpotOfFoul — free text, e.g. "OWN 35".');
+  lines.push('BallCarrier / Passer / Receiver / Tackler — player names from Our Roster (Offense) or the Opponent Roster (Defense), or "Other" if not on the list.');
   lines.push('Result — Good/No Good (FG, PAT) or a free-text play result.');
   lines.push('TD / Turnover / Safety — Y if the play was that type of scoring/possession-change event.');
   lines.push('Notes — Notable Event tag (Bad Snap, Blocked Punt, etc.) or free text.');
@@ -1900,8 +2119,8 @@ function importCSV(inputEl){
       const down = c[3]!==undefined && c[3]!=='' ? parseInt(c[3]) : null;
       const distance = c[4]!==undefined && c[4]!=='' ? parseInt(c[4]) : null;
       return {
-        // c[31] (InternalODK) preserves 'PAT' distinctly from the Hudl-mapped 'K' in c[0]; fall back to c[0] for older exports.
-        odk: c[31] || c[0] || '',
+        // c[36] (InternalODK) preserves 'PAT' distinctly from the Hudl-mapped 'K' in c[0]; fall back to c[0] for older exports.
+        odk: c[36] || c[0] || '',
         formation:c[1]||'', play:c[2]||'',
         down: isNaN(down) ? null : down,
         distance: isNaN(distance) ? null : distance,
@@ -1910,12 +2129,14 @@ function importCSV(inputEl){
         toBoundary:c[10]||'', toTE:c[11]||'', toFB:c[12]||'',
         motion:c[13]||'', motionToStrength:c[14]||'', motionToBoundary:c[15]||'',
         front:c[16]||'', coverage:c[17]||'', stunt:c[18]||'', stuntCall:c[19]||'',
-        clock:c[20]||'', yardLine:c[21]||'',
-        player:c[22]||'', passer:c[23]||'', receiver:c[24]||'', tackler:c[25]||'',
-        result:c[26]||'', isTD: c[27]==='Y', isTurnover: c[28]==='Y', isSafety: c[29]==='Y',
-        notes: c[30] || '',
-        pendingReceiver: c[32] || null,
-        drivingSide: c[33] || null,
+        foulBy:c[20]||'', foulType:c[21]||'', penaltyResult:c[22]||'', spotOfFoul:c[23]||'',
+        kickingTeam:c[24]||'',
+        clock:c[25]||'', yardLine:c[26]||'',
+        player:c[27]||'', passer:c[28]||'', receiver:c[29]||'', tackler:c[30]||'',
+        result:c[31]||'', isTD: c[32]==='Y', isTurnover: c[33]==='Y', isSafety: c[34]==='Y',
+        notes: c[35] || '',
+        pendingReceiver: c[37] || null,
+        drivingSide: c[38] || null,
       };
     });
     state.plays = restored;
@@ -1948,6 +2169,7 @@ function render(){
   } else {
     driveFlagEl.textContent = `PLAY ${drive.totalPlayNumber}`;
   }
+  document.getElementById('sbFieldDirBtn').textContent = state.fieldDirection === 'right' ? 'O driving → (tap to flip)' : '← O driving (tap to flip)';
 
   const offRows = state.plays.filter(p=>p.odk==='O' && ['Run','Pass','Sack'].includes(p.playType));
   const yds = offRows.reduce((s,r)=>s+(r.gain||0),0);
