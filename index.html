@@ -135,6 +135,7 @@
         <div class="sb-dd" id="sbDD">1st &amp; 10</div>
       </div>
       <div class="sb-sub" id="sbSub">Play 1 &middot; No plays logged yet</div>
+      <div id="sbDriveFlag" style="font-family:'SFMono-Regular',Menlo,monospace; font-size:12px; color:var(--amber); font-weight:700; margin-top:2px;"></div>
     </div>
     <div style="text-align:right;">
       <div class="sb-score" id="sbTeamStats">0 yds &middot; 0 TD &middot; 0 TO</div>
@@ -177,6 +178,11 @@ const NOTABLE_EVENTS = [
   "Other (type below)",
 ];
 
+// Stunt/pressure calls, conditional on which Front is in (30 vs 40 front have different vocabularies).
+const STUNTS_30 = ["Strong","Slant","Pinch","Saw","Storm","Mow","?","Other (type below)"];
+const STUNTS_40 = ["Base","Pinch","Bump","Slant","Flex","Alpha","Fist","Storm","Saw","Mike","Mow","Bear","Show Bear","Cross Bear","Axe Sam","Whip","4","?","Other (type below)"];
+const STUNTS_FALLBACK = ["?","Other (type below)"]; // used when Front is 50 or not yet selected
+
 const state = {
   // Default/base roster -- last year's team, will change. Favorites pre-set per priority:
   // Check + Roberts on top for carries, Check on top for pass attempts, Hackbarth on top for catches.
@@ -189,7 +195,13 @@ const state = {
     DEF: ["Ben Spears","Jameson Degenhardt"],
   },
   playbook: {},      // { "Formation Name": ["Play A","Play B"] } -- OFFENSIVE formations/plays
-  defPlaybook: {},   // { "Front/Coverage Name": ["Call A","Call B"] } -- DEFENSIVE fronts/coverages, kept separate from offense
+  // Placeholder plays per defensive formation -- swap these for real calls whenever ready.
+  defPlaybook: {
+    King: ["Play A","Play B","Play C"],
+    Queen: ["Play D","Play E","Play F"],
+    Trips: ["Play G","Play H","Play I"],
+    Pro: ["Play J","Play K","Play L"],
+  },
   plays: [],          // logged rows
   cur: {},            // in-progress selections
   tab: 'setup',
@@ -197,11 +209,16 @@ const state = {
   manualDown: 1,
   manualDistance: 10,
   editingStart: false,
+  confirmingEndDrive: false,
+  reviewFilterUnknown: false,
+  reviewSelected: {},
+  batchEditField: '',
+  batchEditValue: '',
   favorites: { "Tommy Check": true, "Maxim Roberts": true, "Hackbarth": true },      // { "Smith": true }
   lastExportAt: 0,     // count of plays at last export/share
   nextSituation: { mode:'dd', down:1, distance:10, forcedOdk:null },
   lastActionNote: '',  // shown as a dismissible banner after an auto-transition
-  teamName: 'Us',
+  teamName: 'Logan',
   opponentName: 'Opponent',
   gameDate: '',
   quarter: '1',
@@ -213,6 +230,10 @@ const state = {
   showMotion: false,           // default OFF per request
   showMotionToStrength: false, // only meaningful/shown when showMotion is on
   showMotionToBoundary: false, // only meaningful/shown when showMotion is on
+  showFront: true,
+  showCoverage: true,
+  showStunt: true,
+  showDefPlay: true,
   contentMode: 'tagstats',     // 'tag' | 'stats' | 'tagstats'
   appMode: 'live', // 'live' | 'scout'
   hudlImport: null, // { headers, rows, mapping, teamCol, teamOValue, teamDValue } while a Hudl file is being mapped, before commit
@@ -226,6 +247,25 @@ function lastMeaningfulPlay(){
     if(state.plays[i].playType !== 'No Play') return state.plays[i];
   }
   return null;
+}
+
+// Computes drive/play numbering for the UPCOMING snap, for cross-referencing with film later
+// (e.g. "O DRIVE: 2  PLAY: 4  |  PLAY 62" = 4th play of the 2nd offensive drive, 62nd play overall).
+function computeDriveInfo(){
+  const nextOdk = state.nextSituation.forcedOdk || state.cur.odk || '';
+  let driveNumber = 0, playInDrive = 0, lastSide = null;
+  state.plays.forEach(p=>{
+    if(p.odk === 'O' || p.odk === 'D'){
+      if(p.odk !== lastSide){ driveNumber++; playInDrive = 1; lastSide = p.odk; }
+      else { playInDrive++; }
+    }
+  });
+  let nextDriveNumber = driveNumber, nextPlayInDrive = playInDrive;
+  if(nextOdk === 'O' || nextOdk === 'D'){
+    if(nextOdk !== lastSide){ nextDriveNumber = driveNumber + 1; nextPlayInDrive = 1; }
+    else { nextPlayInDrive = playInDrive + 1; }
+  }
+  return { side: nextOdk, driveNumber: nextDriveNumber, playInDrive: nextPlayInDrive, totalPlayNumber: state.plays.length + 1 };
 }
 
 function flipOdk(o){
@@ -411,6 +451,8 @@ function selectField(field, value){
   if(field === 'odk'){ delete state.cur.playType; delete state.cur.player; delete state.cur.passer; delete state.cur.receiver; delete state.cur.tackler; delete state.cur.result; }
   if(field === 'playType'){ delete state.cur.player; delete state.cur.passer; delete state.cur.receiver; delete state.cur.tackler; }
   if(field === 'notableEvent' && state.cur.notableEvent !== 'Other (type below)') delete state.cur.notableEventOther;
+  if(field === 'stunt' && state.cur.stunt !== 'YES'){ delete state.cur.stuntCall; delete state.cur.stuntCallOther; }
+  if(field === 'stuntCall' && state.cur.stuntCall !== 'Other (type below)') delete state.cur.stuntCallOther;
   render();
 }
 
@@ -420,7 +462,7 @@ function toggleTO(){ state.cur.isTurnover = !state.cur.isTurnover; render(); }
 function toggleSafety(){ state.cur.isSafety = !state.cur.isSafety; render(); }
 function setQuarter(q){ state.quarter = q; render(); }
 function saveGameInfo(){
-  state.teamName = document.getElementById('teamNameInput').value.trim() || 'Us';
+  state.teamName = document.getElementById('teamNameInput').value.trim() || 'Logan';
   state.opponentName = document.getElementById('opponentNameInput').value.trim() || 'Opponent';
   state.gameDate = document.getElementById('gameDateInput').value.trim();
   render();
@@ -439,6 +481,10 @@ function setShowMotion(val){
 }
 function setShowMotionToStrength(val){ state.showMotionToStrength = val; render(); }
 function setShowMotionToBoundary(val){ state.showMotionToBoundary = val; render(); }
+function setShowFront(val){ state.showFront = val; render(); }
+function setShowCoverage(val){ state.showCoverage = val; render(); }
+function setShowStunt(val){ state.showStunt = val; render(); }
+function setShowDefPlay(val){ state.showDefPlay = val; render(); }
 function setContentMode(mode){ state.contentMode = mode; render(); }
 
 // Given where the ball was snapped from and which way the last play went, gives a defensible
@@ -495,6 +541,10 @@ function logPlay(){
     motion: state.cur.motion || '',
     motionToStrength: state.cur.motionToStrength || '',
     motionToBoundary: state.cur.motionToBoundary || '',
+    front: state.cur.front || '',
+    coverage: state.cur.coverage || '',
+    stunt: state.cur.stunt || '',
+    stuntCall: state.cur.stuntCall === 'Other (type below)' ? (state.cur.stuntCallOther || '') : (state.cur.stuntCall || ''),
     result: state.cur.result || '',
     player: state.cur.player || '',
     passer: state.cur.passer || '',
@@ -548,7 +598,8 @@ function undoLast(){
 function logNoPlay(){
   const row = {
     odk: '', formation:'', play:'', down:null, distance:null, gain:undefined,
-    playType:'No Play', hash:'', direction:'', tostrength:'', toTE:'', toFB:'',
+    playType:'No Play', hash:'', direction:'', tostrength:'', toBoundary:'', toTE:'', toFB:'',
+    motion:'', motionToStrength:'', motionToBoundary:'', front:'', coverage:'', stunt:'', stuntCall:'',
     result:'', player:'', passer:'', receiver:'', tackler:'',
     isTD:false, isTurnover:false, isSafety:false,
     notableEvent:'', notes:'',
@@ -557,6 +608,44 @@ function logNoPlay(){
   state.plays.push(row);
   state.lastActionNote = '🎥 No Play logged — situation unchanged.';
   render();
+}
+
+// ---- Manual End Drive (Yes/No confirm) ----
+function requestEndDrive(){ state.confirmingEndDrive = true; render(); }
+function cancelEndDrive(){ state.confirmingEndDrive = false; render(); }
+function confirmEndDrive(){
+  const currentSide = state.nextSituation.forcedOdk || state.cur.odk;
+  const flipped = flipOdk((currentSide === 'O' || currentSide === 'D') ? currentSide : 'O');
+  state.nextSituation = { mode:'dd', down:1, distance:10, forcedOdk: flipped };
+  state.cur = { odk: flipped };
+  state.confirmingEndDrive = false;
+  state.lastActionNote = `Drive manually ended — switched to ${flipped}, 1st & 10.`;
+  render();
+}
+
+// ---- End of Quarter ----
+function getOpeningReceiver(){
+  const first = state.plays.find(p => p.odk==='O' || p.odk==='D');
+  return first ? first.odk : null;
+}
+function endQ1(){ state.quarter='2'; state.lastActionNote='End of Q1 — now Q2.'; render(); }
+function endQ2(){
+  const opener = getOpeningReceiver();
+  if(opener === 'O' || opener === 'D'){
+    const secondHalfReceiver = flipOdk(opener);
+    state.nextSituation = { mode:'dd', down:1, distance:10, forcedOdk: secondHalfReceiver };
+    state.cur = { odk: secondHalfReceiver };
+    state.lastActionNote = `Halftime — ${secondHalfReceiver} receives to start the 2nd half, 1st & 10.`;
+  } else {
+    state.lastActionNote = 'Halftime — no plays logged yet, so the 2nd-half receiver could not be determined automatically.';
+  }
+  state.quarter='3';
+  render();
+}
+function endQ3(){ state.quarter='4'; state.lastActionNote='End of Q3 — now Q4.'; render(); }
+function endGame(){
+  state.lastActionNote = 'Game ended — check Export for the final box score.';
+  setTab('export');
 }
 
 function editStart(){ state.editingStart = !state.editingStart; render(); }
@@ -613,12 +702,36 @@ function renderTagTab(){
     html += `<button class="undo-btn" style="width:100%; color:var(--text); margin-bottom:12px;" onclick="repeatLast()">&#8635; Repeat Last (Formation/Hash/Direction/Strength)</button>`;
   }
 
+  html += `<div class="card">
+    <div class="section-label">Quick Actions</div>`;
+  if(state.confirmingEndDrive){
+    html += `<div class="hint" style="margin-top:0; color:var(--amber);">End this drive? This flips possession and resets to 1st &amp; 10.</div>
+      <div class="row-btns">
+        <button class="btn-primary" onclick="confirmEndDrive()">Yes, End Drive</button>
+        <button class="btn-secondary" onclick="cancelEndDrive()">Cancel</button>
+      </div>`;
+  } else {
+    html += `<button class="undo-btn" style="width:100%; margin-bottom:8px;" onclick="requestEndDrive()">End This Drive?</button>`;
+  }
+  html += `<div class="hint" style="margin-top:8px; margin-bottom:6px;">End of quarter — advances the clock and, for halftime, figures out who receives to start the 2nd half.</div>
+    <div class="row-btns" style="flex-wrap:wrap;">
+      <button class="btn-secondary" style="flex:1; min-width:70px;" onclick="endQ1()">End Q1</button>
+      <button class="btn-secondary" style="flex:1; min-width:70px;" onclick="endQ2()">End Q2</button>
+      <button class="btn-secondary" style="flex:1; min-width:70px;" onclick="endQ3()">End Q3</button>
+      <button class="btn-primary" style="flex:1; min-width:70px;" onclick="endGame()">End Game</button>
+    </div>
+  </div>
+
+  `;
+
   html += tileSection('ODK', ['O','D','K','PAT'], 'odk', 'small');
 
   if(state.cur.odk){
     if(!isPAT && state.contentMode !== 'stats'){
       html += tileSection('Formation', formationKeys, 'formation', 'small');
-      if(plays) html += tileSection('Play (' + state.cur.formation + ')', plays, 'play', 'small');
+      if(plays && (isOffense || state.showDefPlay)){
+        html += tileSection('Play (' + state.cur.formation + ')', [...plays,'?'], 'play', 'small');
+      }
     }
     html += tileSection(isPAT ? 'Attempt Type' : 'Play Type', playTypeOptions, 'playType', '');
 
@@ -644,18 +757,33 @@ function renderTagTab(){
       }
 
       if(showTags){
-        html += tileSection('Hash', ['L','M','R'], 'hash', '');
-        html += tileSection('Direction', ['L','M','R'], 'direction', '');
+        html += tileSection('Hash', ['L','M','R','?'], 'hash', '');
+        html += tileSection('Direction', ['L','M','R','?'], 'direction', '');
         if(isOffense){
-          if(state.showToStrength) html += tileSection('To Strength', ['YES','NO','NOT ON FIELD'], 'tostrength', 'small');
-          if(state.showToBoundary) html += tileSection('To Boundary/Field', ['Boundary','Field','Middle'], 'toBoundary', 'small');
-          if(state.showToTE) html += tileSection('To TE', ['YES','NO','NOT ON FIELD'], 'toTE', 'small');
-          if(state.showToFB) html += tileSection('To FB', ['YES','NO','NOT ON FIELD'], 'toFB', 'small');
+          if(state.showToStrength) html += tileSection('To Strength', ['YES','NO','NOT ON FIELD','?'], 'tostrength', 'small');
+          if(state.showToBoundary) html += tileSection('To Boundary/Field', ['Boundary','Field','Middle','?'], 'toBoundary', 'small');
+          if(state.showToTE) html += tileSection('To TE', ['YES','NO','NOT ON FIELD','?'], 'toTE', 'small');
+          if(state.showToFB) html += tileSection('To FB', ['YES','NO','NOT ON FIELD','?'], 'toFB', 'small');
         }
         if(isDefense && state.showMotion){
-          html += tileSection('Motion', ['YES','NO'], 'motion', 'small');
-          if(state.showMotionToStrength) html += tileSection('Motion To Strength', ['YES','NO'], 'motionToStrength', 'small');
-          if(state.showMotionToBoundary) html += tileSection('Motion To Boundary/Field', ['Boundary','Field','Middle'], 'motionToBoundary', 'small');
+          html += tileSection('Motion', ['YES','NO','?'], 'motion', 'small');
+          if(state.showMotionToStrength) html += tileSection('Motion To Strength', ['YES','NO','?'], 'motionToStrength', 'small');
+          if(state.showMotionToBoundary) html += tileSection('Motion To Boundary/Field', ['Boundary','Field','Middle','?'], 'motionToBoundary', 'small');
+        }
+        if(isDefense && state.showFront) html += tileSection('Front', ['30','40','50','?'], 'front', 'small');
+        if(isDefense && state.showCoverage) html += tileSection('Coverage', ['Sky','Cloud','Lock','Trap','?'], 'coverage', 'small');
+        if(isDefense && state.showStunt){
+          html += tileSection('Stunt', ['YES','NO','?'], 'stunt', 'small');
+          if(state.cur.stunt === 'YES'){
+            const stuntList = state.cur.front === '30' ? STUNTS_30 : state.cur.front === '40' ? STUNTS_40 : STUNTS_FALLBACK;
+            if(!state.cur.front || state.cur.front === '?'){
+              html += `<div class="hint" style="margin-top:0;">Select a Front above to see its specific stunt calls — showing a generic list for now.</div>`;
+            }
+            html += tileSection('Stunt Call', stuntList, 'stuntCall', 'small');
+            if(state.cur.stuntCall === 'Other (type below)'){
+              html += `<input type="text" id="stuntCallOther" value="${escAttr(state.cur.stuntCallOther||'')}" placeholder="Describe the stunt/pressure" style="width:100%; margin-bottom:12px; padding:12px; border-radius:10px; border:1px solid var(--line); background:var(--panel); color:var(--text); font-size:14px;" onchange="state.cur.stuntCallOther=this.value;">`;
+            }
+          }
         }
       }
 
@@ -936,7 +1064,11 @@ function renderSetupTab(){
     </div>`;
   }
 
-  let html = `<div class="card">
+  let html = `<div class="card" style="border-color:var(--amber);">
+    <div class="section-label" style="color:var(--amber);">⚠ The "?" Option</div>
+    <div class="hint" style="margin-top:0;">Every field on the Tag tab (Hash, Direction, and every toggleable field below) includes a <b>"?"</b> choice. Use it whenever whoever's tagging didn't see or hear something clearly — it protects the data by making "I don't know" explicit instead of forcing a guess or leaving a gap. A play logged with a "?" somewhere is still far more useful than one silently left blank or wrong.</div>
+  </div>
+  <div class="card">
     <div class="section-label">Offense Toggles (Tag tab)</div>
     <div class="hint" style="margin-top:0;">Turn each of these on or off independently — skip whatever your staff isn't tracking this week. These only appear on Offense (O) snaps.</div>
     ${toggleRow('To Strength', state.showToStrength, "setShowToStrength(true)", "setShowToStrength(false)")}
@@ -956,6 +1088,11 @@ function renderSetupTab(){
       ${toggleRow('Motion To Boundary/Field', state.showMotionToBoundary, "setShowMotionToBoundary(true)", "setShowMotionToBoundary(false)")}
     </div>
     ` : ''}
+    ${toggleRow('Front (30/40/50)', state.showFront, "setShowFront(true)", "setShowFront(false)")}
+    ${toggleRow('Coverage (Sky/Cloud/Lock/Trap)', state.showCoverage, "setShowCoverage(true)", "setShowCoverage(false)")}
+    ${toggleRow('Stunt (Y/N)', state.showStunt, "setShowStunt(true)", "setShowStunt(false)")}
+    ${toggleRow('Play Call (per Formation)', state.showDefPlay, "setShowDefPlay(true)", "setShowDefPlay(false)")}
+    <div class="hint" style="margin-top:0;">When a play is tagged Stunt = YES, a second set of tiles appears to pick the specific stunt/pressure call.</div>
   </div>
 
   <div class="card">
@@ -1103,7 +1240,7 @@ function renderExportTab(){
       This builds a full text report (score by quarter, scoring summary, team totals, leaders, full play-by-play) from everything logged so far.
       A live-updating Google Doc isn't something this tool can create directly — that needs a Google sign-in and API access this app doesn't have — but the report below is formatted to paste cleanly into a blank Doc or email in one shot.
     </div>
-    <button class="log-btn" onclick="emailBoxScore()">Email Final Box Score</button>
+    <button class="log-btn" onclick="emailBoxScore()">Share Final Box Score (Notes, Mail...)</button>
     <div class="row-btns" style="margin-top:8px;">
       <button class="btn-secondary" onclick="copyBoxScore()">Copy Text</button>
       <button class="btn-secondary" onclick="downloadBoxScore()">Download .txt</button>
@@ -1114,18 +1251,54 @@ function renderExportTab(){
   html += `<div class="card">
     <div class="section-label">Export (${state.plays.length} plays)</div>
     <div class="hint">Generic headers — map to Hudl's fields in Hudl's own import step (Video &gt; Library &gt; Import Data). PAT/2PT rows export with ODK = "K" for Hudl, even though they're tracked as "PAT" here for your own clarity. ${sinceExport>0 ? `<span class="export-warn">${sinceExport} play${sinceExport!==1?'s':''} since your last export/share.</span>` : ''}</div>
-    <button class="log-btn" onclick="downloadCSV()">Download CSV</button>
-    ${canWebShare ? `<button class="undo-btn" onclick="shareCSV()" style="color:var(--text); margin-top:10px;">Share CSV (Mail, Messages, AirDrop...)</button>` : `<div class="hint">This browser doesn't support one-tap file sharing — use Download, then attach the file manually in Mail.</div>`}
+    ${canWebShare ? `<button class="log-btn" onclick="shareCSV()">Share CSV (Notes, Mail, AirDrop...)</button>
+    <button class="undo-btn" onclick="downloadCSV()" style="color:var(--text); margin-top:10px;">Download CSV instead</button>` : `<button class="log-btn" onclick="downloadCSV()">Download CSV</button>
+    <div class="hint">This browser doesn't support one-tap file sharing — attach the downloaded file manually in Mail.</div>`}
+  </div>
+
+  <div class="card">
+    <div class="section-label">Data Dictionary</div>
+    <div class="hint">A plain-text legend of every column and every possible value — hand this to whoever's mapping columns during Hudl's import, so that stays fast and consistent week to week instead of re-guessing what "ToBoundary" or a specific stunt name means.</div>
+    ${canWebShare ? `<button class="log-btn" onclick="shareDataDictionary()">Share Data Dictionary</button>
+    <button class="undo-btn" onclick="downloadDataDictionary()" style="color:var(--text); margin-top:10px;">Download instead</button>` : `<button class="log-btn" onclick="downloadDataDictionary()">Download Data Dictionary</button>`}
   </div>`;
+
+  const reviewRows = getReviewRows();
+  const selectedCount = Object.keys(state.reviewSelected).filter(k=>state.reviewSelected[k] && state.plays[k]).length;
 
   html += `<div class="card">
     <div class="section-label">Review &amp; Edit All Plays (${state.plays.length})</div>
     <div class="hint">Everything here is editable — fix a bad Hudl import, or correct a live-tagged mistake. Changes save immediately as you tab away from a field. Note: editing a play here does <b>not</b> recalculate down/distance for other plays after it — that auto-chain only runs while tagging live on the Tag tab.</div>
+    <div style="display:flex; align-items:center; gap:8px; margin-top:8px;">
+      <input type="checkbox" id="filterUnknownCheck" ${state.reviewFilterUnknown?'checked':''} onchange="toggleReviewFilterUnknown()">
+      <label for="filterUnknownCheck" style="font-size:13px;">Show only rows with a "?" in them (${state.plays.filter(hasUnknownValue).length} found)</label>
+    </div>
   </div>
+
+  <div class="card">
+    <div class="section-label">Batch Edit</div>
+    <div class="hint" style="margin-top:0;">Select rows below with their checkbox, pick a field and value here, then apply to all of them at once — handy for fixing a stretch of plays that got mistagged the same way.</div>
+    <div class="row-btns" style="margin-bottom:8px;">
+      <button class="btn-secondary" onclick="reviewSelectAllVisible()">Select All Visible</button>
+      <button class="btn-secondary" onclick="reviewSelectNone()">Select None</button>
+    </div>
+    <div class="row-btns" style="margin-bottom:8px;">
+      <select id="batchFieldSelect" style="flex:1; padding:10px; border-radius:8px; background:var(--panel); color:var(--text); border:1px solid var(--line);" onchange="setBatchEditField(this.value)">
+        <option value="">— field —</option>
+        ${BATCH_EDIT_FIELDS.map(f=>`<option value="${f.key}" ${state.batchEditField===f.key?'selected':''}>${f.label}</option>`).join('')}
+      </select>
+      ${state.batchEditField ? `<select id="batchEditValueSelect" style="flex:1; padding:10px; border-radius:8px; background:var(--panel); color:var(--text); border:1px solid var(--line);">
+        ${(BATCH_EDIT_FIELDS.find(f=>f.key===state.batchEditField)||{options:[]}).options.map(v=>`<option value="${v}">${v}</option>`).join('')}
+      </select>` : ''}
+    </div>
+    <button class="log-btn" onclick="applyBatchEdit()">Apply to ${selectedCount} Selected</button>
+  </div>
+
   <div class="card scroll-x">
     <table>
-      <tr><th>#</th><th>ODK</th><th>Form.</th><th>Down</th><th>Dist</th><th>Gain</th><th>Type</th><th>Hash</th><th>Dir</th><th>ToStr</th><th>ToBnd</th><th>Player</th><th>Result</th><th>TD</th><th>TO</th><th>Saf</th><th>Notes</th><th></th></tr>
-      ${state.plays.map((p,i)=>`<tr>
+      <tr><th></th><th>#</th><th>ODK</th><th>Form.</th><th>Down</th><th>Dist</th><th>Gain</th><th>Type</th><th>Hash</th><th>Dir</th><th>ToStr</th><th>ToBnd</th><th>Front</th><th>Cov</th><th>Stunt</th><th>Player</th><th>Result</th><th>TD</th><th>TO</th><th>Saf</th><th>Notes</th><th></th></tr>
+      ${reviewRows.map(({p,i})=>`<tr style="${hasUnknownValue(p)?'background:rgba(255,182,39,0.08);':''}">
+        <td><input type="checkbox" ${state.reviewSelected[i]?'checked':''} onchange="toggleReviewSelect(${i})"></td>
         <td>${i+1}</td>
         <td><select style="width:52px;" onchange="updatePlayField(${i},'odk',this.value)">${['','O','D','K','PAT'].map(v=>`<option value="${v}" ${p.odk===v?'selected':''}>${v||'-'}</option>`).join('')}</select></td>
         <td><input type="text" value="${escAttr(p.formation)}" style="width:70px;" onchange="updatePlayField(${i},'formation',this.value)"></td>
@@ -1133,10 +1306,13 @@ function renderExportTab(){
         <td><input type="number" value="${p.distance!=null?p.distance:''}" style="width:44px;" onchange="updatePlayField(${i},'distance',this.value)"></td>
         <td><input type="number" value="${p.gain!=null?p.gain:''}" style="width:48px;" onchange="updatePlayField(${i},'gain',this.value)"></td>
         <td><input type="text" value="${escAttr(p.playType)}" style="width:80px;" onchange="updatePlayField(${i},'playType',this.value)"></td>
-        <td><select style="width:52px;" onchange="updatePlayField(${i},'hash',this.value)">${['','L','M','R'].map(v=>`<option value="${v}" ${p.hash===v?'selected':''}>${v||'-'}</option>`).join('')}</select></td>
-        <td><select style="width:52px;" onchange="updatePlayField(${i},'direction',this.value)">${['','L','M','R'].map(v=>`<option value="${v}" ${p.direction===v?'selected':''}>${v||'-'}</option>`).join('')}</select></td>
-        <td><select style="width:80px;" onchange="updatePlayField(${i},'tostrength',this.value)">${['','YES','NO','NOT ON FIELD'].map(v=>`<option value="${v}" ${p.tostrength===v?'selected':''}>${v||'-'}</option>`).join('')}</select></td>
-        <td><select style="width:70px;" onchange="updatePlayField(${i},'toBoundary',this.value)">${['','Boundary','Field','Middle'].map(v=>`<option value="${v}" ${p.toBoundary===v?'selected':''}>${v||'-'}</option>`).join('')}</select></td>
+        <td><select style="width:52px;" onchange="updatePlayField(${i},'hash',this.value)">${['','L','M','R','?'].map(v=>`<option value="${v}" ${p.hash===v?'selected':''}>${v||'-'}</option>`).join('')}</select></td>
+        <td><select style="width:52px;" onchange="updatePlayField(${i},'direction',this.value)">${['','L','M','R','?'].map(v=>`<option value="${v}" ${p.direction===v?'selected':''}>${v||'-'}</option>`).join('')}</select></td>
+        <td><select style="width:80px;" onchange="updatePlayField(${i},'tostrength',this.value)">${['','YES','NO','NOT ON FIELD','?'].map(v=>`<option value="${v}" ${p.tostrength===v?'selected':''}>${v||'-'}</option>`).join('')}</select></td>
+        <td><select style="width:70px;" onchange="updatePlayField(${i},'toBoundary',this.value)">${['','Boundary','Field','Middle','?'].map(v=>`<option value="${v}" ${p.toBoundary===v?'selected':''}>${v||'-'}</option>`).join('')}</select></td>
+        <td><select style="width:52px;" onchange="updatePlayField(${i},'front',this.value)">${['','30','40','50','?'].map(v=>`<option value="${v}" ${p.front===v?'selected':''}>${v||'-'}</option>`).join('')}</select></td>
+        <td><select style="width:64px;" onchange="updatePlayField(${i},'coverage',this.value)">${['','Sky','Cloud','Lock','Trap','?'].map(v=>`<option value="${v}" ${p.coverage===v?'selected':''}>${v||'-'}</option>`).join('')}</select></td>
+        <td><select style="width:52px;" onchange="updatePlayField(${i},'stunt',this.value)">${['','YES','NO','?'].map(v=>`<option value="${v}" ${p.stunt===v?'selected':''}>${v||'-'}</option>`).join('')}</select></td>
         <td><input type="text" value="${escAttr(p.player)}" style="width:80px;" onchange="updatePlayField(${i},'player',this.value)"></td>
         <td><input type="text" value="${escAttr(p.result)}" style="width:70px;" onchange="updatePlayField(${i},'result',this.value)"></td>
         <td><input type="checkbox" ${p.isTD?'checked':''} onchange="updatePlayField(${i},'isTD',this.checked)"></td>
@@ -1280,12 +1456,66 @@ function buildGameReportText(){
 }
 
 function buildCSVString(){
-  const headers = ['ODK','Formation','Play','Down','Distance','Gain','PlayType','Hash','Direction','ToStrength','ToBoundary','ToTE','ToFB','BallCarrier','Passer','Receiver','Tackler','Result','TD','Turnover','Safety','Notes','InternalODK','PendingReceiver','DrivingSide'];
+  const headers = ['ODK','Formation','Play','Down','Distance','Gain','PlayType','Hash','Direction','ToStrength','ToBoundary','ToTE','ToFB','Motion','MotionToStrength','MotionToBoundary','Front','Coverage','Stunt','StuntCall','BallCarrier','Passer','Receiver','Tackler','Result','TD','Turnover','Safety','Notes','InternalODK','PendingReceiver','DrivingSide'];
   const lines = [headers.join(',')];
   state.plays.forEach(p=>{
-    lines.push([hudlOdk(p),p.formation,p.play,p.down,p.distance,p.gain,p.playType,p.hash,p.direction,p.tostrength,p.toBoundary,p.toTE,p.toFB,p.player,p.passer,p.receiver,p.tackler,p.result,p.isTD?'Y':'',p.isTurnover?'Y':'',p.isSafety?'Y':'',p.notes||'',p.odk,p.pendingReceiver||'',p.drivingSide||''].map(csvEscape).join(','));
+    lines.push([hudlOdk(p),p.formation,p.play,p.down,p.distance,p.gain,p.playType,p.hash,p.direction,p.tostrength,p.toBoundary,p.toTE,p.toFB,p.motion,p.motionToStrength,p.motionToBoundary,p.front,p.coverage,p.stunt,p.stuntCall,p.player,p.passer,p.receiver,p.tackler,p.result,p.isTD?'Y':'',p.isTurnover?'Y':'',p.isSafety?'Y':'',p.notes||'',p.odk,p.pendingReceiver||'',p.drivingSide||''].map(csvEscape).join(','));
   });
   return lines.join('\n');
+}
+
+function buildDataDictionaryText(){
+  const lines = [];
+  lines.push('SIDELINE TAGGER — DATA DICTIONARY');
+  lines.push(`${state.teamName} vs. ${state.opponentName}${state.gameDate ? '  ·  '+state.gameDate : ''}`);
+  lines.push('Reference for mapping columns during Hudl\'s own import step (Video > Library > Import Data).');
+  lines.push('');
+  lines.push('ODK — O = our offense, D = our defense (opponent has the ball), K = kicking situation, PAT = extra point/2pt attempt (exports as K for Hudl).');
+  lines.push('Formation — Offense: Right, Left, Roger, Larry, Other (or your uploaded playbook). Defense: King, Queen, Trips, Pro, Other (or your uploaded defensive playbook) — separate vocabulary from offense on purpose.');
+  lines.push('Down / Distance — standard football down and yards to go.');
+  lines.push('Gain — yards gained (negative for a loss).');
+  lines.push('PlayType — Run, Pass, Sack, Penalty (offense/defense); Punt, Kickoff, FG, PAT, 2pt, Onside (kicking).');
+  lines.push('Hash / Direction — L, M, R, or ? if the tagger could not tell.');
+  lines.push('ToStrength — did the run go toward the tight end/strength side? YES / NO / NOT ON FIELD / ?');
+  lines.push('ToBoundary — Boundary (short side of the hash), Field (wide side), Middle, or ?');
+  lines.push('ToTE / ToFB — did the run go toward the TE or the FB specifically? YES / NO / NOT ON FIELD / ?');
+  lines.push('Motion — did the offense show pre-snap motion? YES / NO / ? (Defense only, optional toggle)');
+  lines.push('MotionToStrength / MotionToBoundary — same idea as ToStrength/ToBoundary but for the direction of the motion itself, not the run.');
+  lines.push('Front — defensive front: 30, 40, 50, or ?');
+  lines.push('Coverage — defensive shell: Sky, Cloud, Lock, Trap, or ?');
+  lines.push('Stunt — was a stunt/pressure run? YES / NO / ?');
+  lines.push('StuntCall — the specific call. 30-front calls: ' + STUNTS_30.filter(s=>s!=='?'&&s!=='Other (type below)').join(', ') + '.');
+  lines.push('  40-front calls: ' + STUNTS_40.filter(s=>s!=='?'&&s!=='Other (type below)').join(', ') + '.');
+  lines.push('BallCarrier / Passer / Receiver / Tackler — player names from the roster, or "Other" if not on the list.');
+  lines.push('Result — Good/No Good (FG, PAT) or a free-text play result.');
+  lines.push('TD / Turnover / Safety — Y if the play was that type of scoring/possession-change event.');
+  lines.push('Notes — Notable Event tag (Bad Snap, Blocked Punt, etc.) or free text.');
+  lines.push('');
+  lines.push('The "?" value anywhere means the person tagging could not see or hear that detail clearly — treat it as missing data to review, not as a real "unknown" football situation.');
+  return lines.join('\n');
+}
+
+function shareDataDictionary(){
+  const text = buildDataDictionaryText();
+  const subject = `Data Dictionary — ${state.teamName} vs. ${state.opponentName}`;
+  if(navigator.canShare){
+    const blob = new Blob([text], {type:'text/plain'});
+    const file = new File([blob], 'data_dictionary.txt', {type:'text/plain'});
+    if(navigator.canShare({files:[file]})){
+      navigator.share({files:[file], title:subject}).catch(()=>{});
+      return;
+    }
+  }
+  downloadDataDictionary();
+}
+function downloadDataDictionary(){
+  const text = buildDataDictionaryText();
+  const blob = new Blob([text], {type:'text/plain'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'data_dictionary.txt';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }
 
 function emailBoxScore(){
@@ -1506,6 +1736,46 @@ function updatePlayField(idx, field, rawValue){
 }
 function deletePlayAt(idx){
   state.plays.splice(idx, 1);
+  state.reviewSelected = {}; // indices shift after a delete -- clear rather than risk pointing at the wrong row
+  render();
+}
+
+// ---- Review & Edit: filter to unresolved "?" rows, multi-select, batch edit ----
+const BATCH_EDIT_FIELDS = [
+  {key:'odk', label:'ODK', options:['O','D','K','PAT']},
+  {key:'hash', label:'Hash', options:['L','M','R','?']},
+  {key:'direction', label:'Direction', options:['L','M','R','?']},
+  {key:'tostrength', label:'To Strength', options:['YES','NO','NOT ON FIELD','?']},
+  {key:'toBoundary', label:'To Boundary/Field', options:['Boundary','Field','Middle','?']},
+  {key:'front', label:'Front', options:['30','40','50','?']},
+  {key:'coverage', label:'Coverage', options:['Sky','Cloud','Lock','Trap','?']},
+  {key:'stunt', label:'Stunt', options:['YES','NO','?']},
+];
+
+function hasUnknownValue(p){
+  const fields = ['hash','direction','tostrength','toBoundary','toTE','toFB','motion','motionToStrength','motionToBoundary','front','coverage','stunt'];
+  return fields.some(f => p[f] === '?');
+}
+function getReviewRows(){
+  return state.plays.map((p,i)=>({p,i})).filter(r => !state.reviewFilterUnknown || hasUnknownValue(r.p));
+}
+function toggleReviewFilterUnknown(){ state.reviewFilterUnknown = !state.reviewFilterUnknown; render(); }
+function toggleReviewSelect(i){ state.reviewSelected[i] = !state.reviewSelected[i]; render(); }
+function reviewSelectAllVisible(){
+  getReviewRows().forEach(r => { state.reviewSelected[r.i] = true; });
+  render();
+}
+function reviewSelectNone(){ state.reviewSelected = {}; render(); }
+function setBatchEditField(field){ state.batchEditField = field; state.batchEditValue = ''; render(); }
+function applyBatchEdit(){
+  const field = state.batchEditField;
+  const valueSelect = document.getElementById('batchEditValueSelect');
+  const value = valueSelect ? valueSelect.value : '';
+  if(!field || !value){ alert('Pick a field and a value first.'); return; }
+  const selectedIdxs = Object.keys(state.reviewSelected).filter(k => state.reviewSelected[k] && state.plays[k]);
+  if(!selectedIdxs.length){ alert('No rows selected — tap the checkboxes on the rows you want to change first.'); return; }
+  selectedIdxs.forEach(i => { state.plays[i][field] = value; });
+  state.lastActionNote = `Batch-updated ${field} on ${selectedIdxs.length} play${selectedIdxs.length!==1?'s':''}.`;
   render();
 }
 
@@ -1521,19 +1791,21 @@ function importCSV(inputEl){
       const down = c[3]!==undefined && c[3]!=='' ? parseInt(c[3]) : null;
       const distance = c[4]!==undefined && c[4]!=='' ? parseInt(c[4]) : null;
       return {
-        // c[22] (InternalODK) preserves 'PAT' distinctly from the Hudl-mapped 'K' in c[0]; fall back to c[0] for older exports.
-        odk: c[22] || c[0] || '',
+        // c[29] (InternalODK) preserves 'PAT' distinctly from the Hudl-mapped 'K' in c[0]; fall back to c[0] for older exports.
+        odk: c[29] || c[0] || '',
         formation:c[1]||'', play:c[2]||'',
         down: isNaN(down) ? null : down,
         distance: isNaN(distance) ? null : distance,
         gain: c[5]!==undefined && c[5]!=='' ? parseInt(c[5]) : undefined,
         playType:c[6]||'', hash:c[7]||'', direction:c[8]||'', tostrength:c[9]||'',
         toBoundary:c[10]||'', toTE:c[11]||'', toFB:c[12]||'',
-        player:c[13]||'', passer:c[14]||'', receiver:c[15]||'', tackler:c[16]||'',
-        result:c[17]||'', isTD: c[18]==='Y', isTurnover: c[19]==='Y', isSafety: c[20]==='Y',
-        notes: c[21] || '',
-        pendingReceiver: c[23] || null,
-        drivingSide: c[24] || null,
+        motion:c[13]||'', motionToStrength:c[14]||'', motionToBoundary:c[15]||'',
+        front:c[16]||'', coverage:c[17]||'', stunt:c[18]||'', stuntCall:c[19]||'',
+        player:c[20]||'', passer:c[21]||'', receiver:c[22]||'', tackler:c[23]||'',
+        result:c[24]||'', isTD: c[25]==='Y', isTurnover: c[26]==='Y', isSafety: c[27]==='Y',
+        notes: c[28] || '',
+        pendingReceiver: c[30] || null,
+        drivingSide: c[31] || null,
       };
     });
     state.plays = restored;
@@ -1558,6 +1830,14 @@ function render(){
     : `Play ${state.plays.length+1} · ${state.plays.length} logged`;
   document.getElementById('sbLabel').textContent = state.editingStart ? 'Manual Override' : (isScout ? 'Situation' : 'Next Snap');
   document.getElementById('sbDD').style.textShadow = isScout ? 'none' : '0 0 18px rgba(255,182,39,.35)';
+
+  const drive = computeDriveInfo();
+  const driveFlagEl = document.getElementById('sbDriveFlag');
+  if(drive.side === 'O' || drive.side === 'D'){
+    driveFlagEl.textContent = `${drive.side} DRIVE: ${drive.driveNumber}  PLAY: ${drive.playInDrive}  |  PLAY ${drive.totalPlayNumber}`;
+  } else {
+    driveFlagEl.textContent = `PLAY ${drive.totalPlayNumber}`;
+  }
 
   const offRows = state.plays.filter(p=>p.odk==='O' && ['Run','Pass','Sack'].includes(p.playType));
   const yds = offRows.reduce((s,r)=>s+(r.gain||0),0);
