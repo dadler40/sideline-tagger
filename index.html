@@ -1410,13 +1410,30 @@ function renderSetupTab(){
       When in doubt: tap "?" instead of guessing, and export before you walk away. That's really it.
     </div>` : ''}
   </div>
+
+  <div class="card" ${state.contentMode !== 'tagstats' ? 'style="border-color:var(--amber);"' : ''}>
+    <div class="section-label" ${state.contentMode !== 'tagstats' ? 'style="color:var(--amber);"' : ''}>Mode</div>
+    <div class="hint">Mode: <b>Live</b> is for tagging during the game (urgent framing, export reminders). <b>Scout</b> is for reviewing film after the fact — no clock pressure, calmer framing. All features work the same in both; this just changes tone/emphasis.</div>
+    <div class="filter-pill" style="width:fit-content; margin-bottom:16px;">
+      <button class="${state.appMode==='live'?'active':''}" onclick="setAppMode('live')">Live</button>
+      <button class="${state.appMode==='scout'?'active':''}" onclick="setAppMode('scout')">Scout</button>
+    </div>
+    <div class="hint" style="margin-top:0;"><b>Content Mode matters a lot for the toggles below</b> — it overrides them. <b>Tag</b>: tendency fields only, hides Ball Carrier/Passer/Tackle Credit/etc. no matter what's toggled on. <b>Stats</b>: player attribution and scoring only, hides Formation/Hash/Direction/Front/Coverage/Stunt/etc. no matter what's toggled on. <b>Tag + Stats</b>: everything, no overrides — the toggles below work exactly as set.</div>
+    <div class="filter-pill" style="width:fit-content;">
+      <button class="${state.contentMode==='tag'?'active':''}" onclick="setContentMode('tag')">Tag</button>
+      <button class="${state.contentMode==='stats'?'active':''}" onclick="setContentMode('stats')">Stats</button>
+      <button class="${state.contentMode==='tagstats'?'active':''}" onclick="setContentMode('tagstats')">Tag + Stats</button>
+    </div>
+    ${state.contentMode === 'tag' ? `<div class="hint" style="margin-top:10px; color:var(--amber);">Currently hiding: Ball Carrier, Passer, Receiver, Tackle Credit, Kicker/Punter, Returner — regardless of their toggles.</div>` : ''}
+    ${state.contentMode === 'stats' ? `<div class="hint" style="margin-top:10px; color:var(--amber);">Currently hiding: Formation, Formation Strength, Back Location, Play, Hash, Direction, To Strength/Boundary/TE/FB, Gap, Pass Zone, Motion, Front, Coverage, Stunt — regardless of their toggles.</div>` : ''}
+  </div>
   <div class="card" style="border-color:var(--amber);">
     <div class="section-label" style="color:var(--amber);">⚠ The "?" Option</div>
     <div class="hint" style="margin-top:0;">Every field on the Tag tab (Hash, Direction, and every toggleable field below) includes a <b>"?"</b> choice. Use it whenever whoever's tagging didn't see or hear something clearly — it protects the data by making "I don't know" explicit instead of forcing a guess or leaving a gap. A play logged with a "?" somewhere is still far more useful than one silently left blank or wrong.</div>
   </div>
   <div class="card">
     <div class="section-label">Offense Toggles (Tag tab)</div>
-    <div class="hint" style="margin-top:0;">Turn each of these on or off independently — skip whatever your staff isn't tracking this week. These only appear on Offense (O) snaps.</div>
+    <div class="hint" style="margin-top:0;">Turn each of these on or off independently — skip whatever your staff isn't tracking this week. These only appear on Offense (O) snaps${state.contentMode==='stats' ? ', and are currently ALL hidden by Content Mode = Stats (see Mode card above)' : ''}.</div>
     ${toggleRow('To Strength', state.showToStrength, "setShowToStrength(true)", "setShowToStrength(false)")}
     ${toggleRow('To Boundary/Field', state.showToBoundary, "setShowToBoundary(true)", "setShowToBoundary(false)")}
     ${toggleRow('To TE', state.showToTE, "setShowToTE(true)", "setShowToTE(false)")}
@@ -1429,7 +1446,7 @@ function renderSetupTab(){
 
   <div class="card">
     <div class="section-label">Defense Toggles (Tag tab)</div>
-    <div class="hint" style="margin-top:0;">These only appear on Defense (D) snaps.</div>
+    <div class="hint" style="margin-top:0;">These only appear on Defense (D) snaps. ${state.contentMode==='tag' ? 'Tackle Credit is currently hidden by Content Mode = Tag (see Mode card above).' : ''} ${state.contentMode==='stats' ? 'Motion/Front/Coverage/Stunt/Play Call/Opponent Formations are currently ALL hidden by Content Mode = Stats (see Mode card above).' : ''}</div>
     ${toggleRow('Tackle Credit', state.showTackleCredit, "setShowTackleCredit(true)", "setShowTackleCredit(false)")}
     ${toggleRow('Motion', state.showMotion, "setShowMotion(true)", "setShowMotion(false)")}
     ${state.showMotion ? `
@@ -1504,20 +1521,6 @@ function renderSetupTab(){
     ` : `<div class="hint" style="margin-top:0;">Load your season schedule above to pick a game with one tap — or just fill in Game Info manually above, that still works fine without a schedule.</div>`)}
   </div>
 
-  <div class="card">
-    <div class="section-label">Mode</div>
-    <div class="hint">Mode: <b>Live</b> is for tagging during the game (urgent framing, export reminders). <b>Scout</b> is for reviewing film after the fact — no clock pressure, calmer framing. All features work the same in both; this just changes tone/emphasis.</div>
-    <div class="filter-pill" style="width:fit-content; margin-bottom:16px;">
-      <button class="${state.appMode==='live'?'active':''}" onclick="setAppMode('live')">Live</button>
-      <button class="${state.appMode==='scout'?'active':''}" onclick="setAppMode('scout')">Scout</button>
-    </div>
-    <div class="hint" style="margin-top:0;"><b>Tag</b>: tendency fields only, no player attribution. <b>Stats</b>: player attribution (ball carrier, passer, etc.) and scoring only, no tendency fields, hash/direction not required. <b>Tag + Stats</b>: everything, as before.</div>
-    <div class="filter-pill" style="width:fit-content;">
-      <button class="${state.contentMode==='tag'?'active':''}" onclick="setContentMode('tag')">Tag</button>
-      <button class="${state.contentMode==='stats'?'active':''}" onclick="setContentMode('stats')">Stats</button>
-      <button class="${state.contentMode==='tagstats'?'active':''}" onclick="setContentMode('tagstats')">Tag + Stats</button>
-    </div>
-  </div>
   <div class="card">
     <div class="section-label">Our Roster (drives player pickers on Offense)</div>
     <div class="hint">
