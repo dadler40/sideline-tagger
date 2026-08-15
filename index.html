@@ -268,6 +268,7 @@ const state = {
   showFormationStrength: true,
   showOppFormation: true,
   showBackLocation: true,
+  showBackLocationDef: true,
   showHowToGuide: false,
   repeatLastFields: { formation: true, hash: true, direction: true, strength: true },
   showCoverage: true,
@@ -622,6 +623,7 @@ function setShowPassZone(val){ state.showPassZone = val; render(); }
 function setShowFormationStrength(val){ state.showFormationStrength = val; render(); }
 function setShowOppFormation(val){ state.showOppFormation = val; render(); }
 function setShowBackLocation(val){ state.showBackLocation = val; render(); }
+function setShowBackLocationDef(val){ state.showBackLocationDef = val; render(); }
 function toggleHowToGuide(){ state.showHowToGuide = !state.showHowToGuide; render(); }
 function setShowCoverage(val){ state.showCoverage = val; render(); }
 function setShowStunt(val){ state.showStunt = val; render(); }
@@ -953,6 +955,9 @@ function renderTagTab(){
       }
       if(isOffense && state.showBackLocation){
         html += tileSection('Back Pre-Snap Location', ['Left','Pistol','Right','?'], 'backLocation', 'small');
+      }
+      if(isDefense && state.showBackLocationDef){
+        html += tileSection('Back Pre-Snap Location (Opponent)', ['Left','Pistol','Right','?'], 'backLocation', 'small');
       }
       if(plays && (isOffense || state.showDefPlay)){
         html += tileSection('Play (' + state.cur.formation + ')', [...plays,'?'], 'play', 'small');
@@ -1460,6 +1465,7 @@ function renderSetupTab(){
     ${toggleRow('Stunt (Y/N)', state.showStunt, "setShowStunt(true)", "setShowStunt(false)")}
     ${toggleRow('Play Call (per Formation)', state.showDefPlay, "setShowDefPlay(true)", "setShowDefPlay(false)")}
     ${toggleRow('Include Opponent Formations in list', state.showOppFormation, "setShowOppFormation(true)", "setShowOppFormation(false)")}
+    ${toggleRow('Back Pre-Snap Location (Opponent)', state.showBackLocationDef, "setShowBackLocationDef(true)", "setShowBackLocationDef(false)")}
     <div class="hint" style="margin-top:0;">When a play is tagged Stunt = YES, a second set of tiles appears to pick the specific stunt/pressure call.</div>
   </div>
 
