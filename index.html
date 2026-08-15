@@ -75,6 +75,7 @@
   .tile.selected{ background:var(--amber); color:#1a1200; border-color:var(--amber); }
   .tile.selected.green{ background:var(--green); color:#08150a; border-color:var(--green); }
   .tile.selected.red{ background:var(--red); color:#2a0708; border-color:var(--red); }
+  .tile:active{ transform:scale(0.96); opacity:0.85; }
   .tile:disabled{ opacity:.35; }
 
   .log-btn{
@@ -165,6 +166,7 @@ const DEFAULT_FORMATIONS = ["Right","Left","Roger","Larry","Other"];
 const DEFAULT_DEF_FORMATIONS = ["King","Queen","Trips","Pro","Other"];
 const OFF_DEF_PLAY_TYPES = ["Run","Pass","Sack","Penalty"];
 const KICK_PLAY_TYPES = ["Punt","Kickoff","FG","Onside"];
+const SPECIAL_TEAMS_PLAY_TYPES = ["Kickoff Return","Punt Return","Blocked Kick","Muffed Return","Fake Punt/FG","Other"];
 const PAT_PLAY_TYPES = ["PAT Kick","2pt Run","2pt Pass"];
 const NOTABLE_EVENTS = [
   "Bad Snap",
@@ -207,6 +209,13 @@ const state = {
     DEF: ["Ben Spears","Jameson Degenhardt"],
   },
   oppRoster: {}, // { "RB": ["3 David Irvin", ...], "QB":[...], "WR":[...] } -- editable each week, opponent's own players
+  // Opponent's OWN offensive formations/plays -- what THEY show, from scouted film. Separate from our
+  // own defensive calls (King/Queen/Trips/Pro), which describe what WE do, not what they do.
+  oppPlaybook: {
+    'YOFF TRIPS': ['STRONG SPLIT ZONE DIVE','FADE-OUT-OUT/SLANT','FADE-OUT-OUT/FADE'],
+    'YOFF DEUCE': ['SLANT-OUT/SLANT-OUT','DIG-SEAM/DIG-SEAM','STRONG OUTSIDE ZONE','SLANT-SLANT/HITCH-OUT','SLANT-SLANT/SLANT-OUT'],
+    'DEUCE SLIP': ['STRONG OUTSIDE ZONE','WEAK ZONE DIVE KEEP'],
+  },
   schedule: [], // [{opponent, date}, ...] -- season schedule, one tap to start a new game from this list
   pendingNewGameIndex: null,
   confirmingNewGame: false,
@@ -227,6 +236,8 @@ const state = {
   editingStart: false,
   confirmingEndDrive: false,
   reviewFilterUnknown: false,
+  reviewFilterQuarter: 'All',
+  reviewFilterPlayType: 'All',
   reviewSelected: {},
   batchEditField: '',
   batchEditValue: '',
@@ -252,6 +263,11 @@ const state = {
   showFront: true,
   showClock: false,
   showYardLine: false,
+  showGap: true,
+  showPassZone: true,
+  showFormationStrength: true,
+  showOppFormation: true,
+  showBackLocation: true,
   showHowToGuide: false,
   repeatLastFields: { formation: true, hash: true, direction: true, strength: true },
   showCoverage: true,
@@ -312,6 +328,13 @@ function computeNextSituation(row){
   // After the PAT/2pt attempt, the scoring team kicks off.
   if(row.odk === 'PAT'){
     return { mode:'special', label:'Kickoff', forcedOdk:'K', pendingReceiver: row.pendingReceiver };
+  }
+  // Special Teams (returns, blocked kicks, etc.) doesn't drive down/distance/possession by itself --
+  // we don't reliably know who "has the ball" for down purposes from a return alone. TD/Safety above
+  // still apply if the return itself scored; otherwise the situation stays exactly as it was, and the
+  // coach tags the resulting real O or D snap as its own separate play.
+  if(row.odk === 'S'){
+    return { mode: state.nextSituation.mode, down: state.nextSituation.down, distance: state.nextSituation.distance, forcedOdk: state.nextSituation.forcedOdk, label: state.nextSituation.label, pendingReceiver: state.nextSituation.pendingReceiver };
   }
   // After any kicking play, whoever receives starts a fresh 1st & 10.
   if(row.odk === 'K'){
@@ -418,6 +441,11 @@ function loadOppRoster(){
   state.oppRoster = detectRosterFormat(text)==='label' ? parseKeyList(text) : parseRosterCSV(text);
   render();
 }
+function loadOppPlaybook(){
+  state.oppPlaybook = parseKeyList(document.getElementById('oppPlaybookInput').value);
+  render();
+}
+function clearOppPlaybook(){ state.oppPlaybook = {}; document.getElementById('oppPlaybookInput').value=''; render(); }
 
 // ---- Season Schedule: "Opponent @ Date" per line ----
 function parseSchedule(text){
@@ -513,6 +541,7 @@ function handleFileUpload(inputEl, targetTextareaId){
     // did nothing until "Load Roster"/"Load Playbook" was clicked separately.
     if(targetTextareaId === 'rosterInput') loadRoster();
     else if(targetTextareaId === 'oppRosterInput') loadOppRoster();
+    else if(targetTextareaId === 'oppPlaybookInput') loadOppPlaybook();
     else if(targetTextareaId === 'scheduleInput') loadSchedule();
     else if(targetTextareaId === 'playbookInput') loadPlaybook();
     else if(targetTextareaId === 'defPlaybookInput') loadDefPlaybook();
@@ -588,6 +617,11 @@ function setShowMotionToBoundary(val){ state.showMotionToBoundary = val; render(
 function setShowFront(val){ state.showFront = val; render(); }
 function setShowClock(val){ state.showClock = val; render(); }
 function setShowYardLine(val){ state.showYardLine = val; render(); }
+function setShowGap(val){ state.showGap = val; render(); }
+function setShowPassZone(val){ state.showPassZone = val; render(); }
+function setShowFormationStrength(val){ state.showFormationStrength = val; render(); }
+function setShowOppFormation(val){ state.showOppFormation = val; render(); }
+function setShowBackLocation(val){ state.showBackLocation = val; render(); }
 function toggleHowToGuide(){ state.showHowToGuide = !state.showHowToGuide; render(); }
 function setShowCoverage(val){ state.showCoverage = val; render(); }
 function setShowStunt(val){ state.showStunt = val; render(); }
@@ -632,6 +666,7 @@ function toggleRepeatLastField(key){ state.repeatLastFields[key] = !state.repeat
 function canLog(){
   if(!state.cur.odk || !state.cur.playType) return false;
   if(state.cur.odk === 'PAT') return !!state.cur.result;
+  if(state.cur.odk === 'S') return true; // Special Teams: playType alone is enough, everything else is optional detail
   if(state.contentMode === 'stats') return state.cur.gain !== undefined; // Hash/Direction aren't shown in Stats-only mode
   return state.cur.hash && state.cur.direction && (state.cur.gain !== undefined);
 }
@@ -672,6 +707,11 @@ function logPlay(){
     penaltyResult: state.cur.penaltyResult || '',
     spotOfFoul: state.cur.spotOfFoul || '',
     kickingTeam: state.cur.kickingTeam || '',
+    returningTeam: state.cur.returningTeam || '',
+    gap: state.cur.gap || '',
+    passZone: state.cur.passZone || '',
+    formationStrength: state.cur.formationStrength || '',
+    backLocation: state.cur.backLocation || '',
     clock: state.cur.clock || '',
     yardLine: state.cur.yardLine || '',
     result: state.cur.result || '',
@@ -802,14 +842,19 @@ function renderTagTab(){
   const isDefense = state.cur.odk === 'D';
   const isKicking = state.cur.odk === 'K';
   const isPAT = state.cur.odk === 'PAT';
-  const playTypeOptions = isKicking ? KICK_PLAY_TYPES : (isPAT ? PAT_PLAY_TYPES : OFF_DEF_PLAY_TYPES);
+  const isSpecialTeams = state.cur.odk === 'S';
+  const playTypeOptions = isKicking ? KICK_PLAY_TYPES : (isPAT ? PAT_PLAY_TYPES : (isSpecialTeams ? SPECIAL_TEAMS_PLAY_TYPES : OFF_DEF_PLAY_TYPES));
 
   // Offense and Defense use completely separate formation vocabularies -- your run/pass formations
-  // are meaningless on defensive snaps, and vice versa for fronts/coverages.
+  // are meaningless on defensive snaps, and vice versa for fronts/coverages. On Defense, the picker
+  // combines both our own defensive calls AND the opponent's scouted formations into one list, since
+  // both answer the same underlying question ("what formation is on the field") from different sides.
   const activePlaybook = isDefense ? state.defPlaybook : state.playbook;
   const defaultFormationList = isDefense ? DEFAULT_DEF_FORMATIONS : DEFAULT_FORMATIONS;
-  const formationKeys = Object.keys(activePlaybook).length ? Object.keys(activePlaybook) : defaultFormationList;
-  const plays = state.cur.formation && activePlaybook[state.cur.formation] ? activePlaybook[state.cur.formation] : null;
+  const ourFormationKeys = Object.keys(activePlaybook).length ? Object.keys(activePlaybook) : defaultFormationList;
+  const oppFormationKeys = (isDefense && state.showOppFormation) ? Object.keys(state.oppPlaybook) : [];
+  const formationKeys = [...new Set([...ourFormationKeys, ...oppFormationKeys])];
+  const plays = state.cur.formation ? (activePlaybook[state.cur.formation] || state.oppPlaybook[state.cur.formation] || null) : null;
 
   // On Defense snaps, the ball carrier/passer/receiver is an OPPONENT player, not ours --
   // pull from the opponent roster there. Tackle Credit stays our own DEF roster always,
@@ -870,7 +915,7 @@ function renderTagTab(){
 
   `;
 
-  html += tileSection('ODK', ['O','D','K','PAT'], 'odk', 'small');
+  html += tileSection('ODK', ['O','D','K','PAT','S'], 'odk', 'small');
 
   if(state.cur.odk){
     if(state.showClock || state.showYardLine){
@@ -882,14 +927,38 @@ function renderTagTab(){
         <div class="section-label">${highlight ? (isScoring ? '⚠ Clock at Score' : '⚠ Clock/Ball at Start of Drive') : 'Clock / Ball Position'}</div>
         <div class="row-btns">
           ${state.showClock ? `<input type="text" value="${escAttr(state.cur.clock||'')}" placeholder="Clock (e.g. 8:42)" style="flex:1; padding:12px; border-radius:10px; border:1px solid var(--line); background:var(--panel); color:var(--text); font-size:14px;" onchange="state.cur.clock=this.value;">` : ''}
-          ${state.showYardLine ? `<input type="text" value="${escAttr(state.cur.yardLine||'')}" placeholder="Yard Line (e.g. OWN 25)" style="flex:1; padding:12px; border-radius:10px; border:1px solid var(--line); background:var(--panel); color:var(--text); font-size:14px;" onchange="state.cur.yardLine=this.value;">` : ''}
+          ${state.showYardLine ? `<input type="text" value="${escAttr(state.cur.yardLine||'')}" placeholder="Yard Line (e.g. OWN 25)" style="flex:1; padding:12px; border-radius:10px; border:1px solid var(--line); background:var(--panel); color:var(--text); font-size:14px;" onchange="state.cur.yardLine=this.value; render();">` : ''}
         </div>
+        ${(() => {
+          if(!state.showYardLine) return '';
+          const pos = parseYardLineToFieldPosition(state.cur.yardLine);
+          if(pos === null) return '';
+          const rz = isRedZonePosition(pos);
+          return `<div style="margin-top:10px;">
+            <div style="position:relative; height:14px; border-radius:7px; background:linear-gradient(to right, var(--panel) 0%, var(--panel) 80%, rgba(255,182,39,0.25) 80%, rgba(255,182,39,0.25) 100%); border:1px solid var(--line); overflow:visible;">
+              <div style="position:absolute; left:${pos}%; top:-3px; width:4px; height:20px; background:${rz?'var(--amber)':state.ourColor}; border-radius:2px; transform:translateX(-2px);"></div>
+            </div>
+            <div style="display:flex; justify-content:space-between; font-size:10px; color:var(--muted); margin-top:2px;">
+              <span>OWN GOAL</span><span>50</span><span>OPP GOAL</span>
+            </div>
+          </div>`;
+        })()}
       </div>`;
     }
     if(!isPAT && state.contentMode !== 'stats'){
       html += tileSection('Formation', formationKeys, 'formation', 'small');
+      if(isOffense && state.showFormationStrength){
+        html += tileSection('Formation Strength', ['R','L','?'], 'formationStrength', 'small');
+        html += `<div class="hint" style="margin-top:-6px; margin-bottom:12px;">Which way the formation itself is set (a property of the personnel/alignment) — different from "To Strength" below, which is whether the run went toward it.</div>`;
+      }
+      if(isOffense && state.showBackLocation){
+        html += tileSection('Back Pre-Snap Location', ['Left','Pistol','Right','?'], 'backLocation', 'small');
+      }
       if(plays && (isOffense || state.showDefPlay)){
         html += tileSection('Play (' + state.cur.formation + ')', [...plays,'?'], 'play', 'small');
+      }
+      if(isDefense && state.showOppFormation && !Object.keys(state.oppPlaybook).length){
+        html += `<div class="hint" style="margin-top:0;">No Opponent Formations loaded yet — add them on the Roster/Plays tab under "Opponent Formations (Scouting)" and they'll appear right in the Formation list above.</div>`;
       }
     }
     html += tileSection(isPAT ? 'Attempt Type' : 'Play Type', playTypeOptions, 'playType', '');
@@ -920,6 +989,14 @@ function renderTagTab(){
         if(showStats && state.cur.playType==='Punt' && pList) html += tileSection('Punter', [...pList,'Other'], 'player', 'small');
         if(state.cur.playType==='FG') html += tileSection('Result', ['Good','No Good'], 'result', '');
       }
+      if(isSpecialTeams){
+        html += tileSection('Returning Team', ['Us','Opponent','?'], 'returningTeam', 'small');
+        if(showStats && (state.cur.returningTeam === 'Us' || state.cur.returningTeam === 'Opponent')){
+          const returnerRoster = state.cur.returningTeam === 'Us' ? state.roster : state.oppRoster;
+          const returnerList = sortedWithFavorites([...(returnerRoster['RB']||[]), ...(returnerRoster['WR']||[]), ...(returnerRoster['DEF']||[])]);
+          if(returnerList.length) html += tileSection('Returner', [...returnerList,'Other'], 'player', 'small');
+        }
+      }
 
       if(state.cur.playType === 'Penalty'){
         html += tileSection('Foul By', ['Offense','Defense','?'], 'foulBy', 'small');
@@ -942,6 +1019,8 @@ function renderTagTab(){
           if(state.showToBoundary) html += tileSection('To Boundary/Field', ['Boundary','Field','Middle','?'], 'toBoundary', 'small');
           if(state.showToTE) html += tileSection('To TE', ['YES','NO','NOT ON FIELD','?'], 'toTE', 'small');
           if(state.showToFB) html += tileSection('To FB', ['YES','NO','NOT ON FIELD','?'], 'toFB', 'small');
+          if(state.showGap && state.cur.playType === 'Run') html += tileSection('Gap', ['A','B','C','D','?'], 'gap', 'small');
+          if(state.showPassZone && state.cur.playType === 'Pass') html += tileSection('Pass Zone', ['1','2','3','4','5','6','7','8','9','?'], 'passZone', 'small');
         }
         if(isDefense && state.showMotion){
           html += tileSection('Motion', ['YES','NO','?'], 'motion', 'small');
@@ -1177,6 +1256,16 @@ function renderTendenciesTab(){
     </div>`;
   }
 
+  const redZoneRows = rows.filter(r => isRedZonePosition(parseYardLineToFieldPosition(r.yardLine)) && ['Run','Pass'].includes(r.playType));
+  if(redZoneRows.length){
+    const rzRun = redZoneRows.filter(r=>r.playType==='Run').length;
+    html += `<div class="card"><div class="section-label">Red Zone Tendencies</div>
+      <div class="hint" style="margin-top:0;">Plays with a Yard Line inside the opponent's 20 (needs Yard Line tracking turned on). ${redZoneRows.length} play${redZoneRows.length!==1?'s':''} found.</div>
+      ${pctBar('Run %', rzRun, redZoneRows.length)}
+      ${pctBar('Pass %', redZoneRows.length-rzRun, redZoneRows.length)}
+    </div>`;
+  }
+
   html += `<div class="card"><div class="section-label">Tendencies by Down</div>`;
   [1,2,3,4].forEach(d=>{
     const dRows = rows.filter(r=>r.down===d);
@@ -1332,6 +1421,10 @@ function renderSetupTab(){
     ${toggleRow('To Boundary/Field', state.showToBoundary, "setShowToBoundary(true)", "setShowToBoundary(false)")}
     ${toggleRow('To TE', state.showToTE, "setShowToTE(true)", "setShowToTE(false)")}
     ${toggleRow('To FB', state.showToFB, "setShowToFB(true)", "setShowToFB(false)")}
+    ${toggleRow('Formation Strength (R/L)', state.showFormationStrength, "setShowFormationStrength(true)", "setShowFormationStrength(false)")}
+    ${toggleRow('Back Pre-Snap Location', state.showBackLocation, "setShowBackLocation(true)", "setShowBackLocation(false)")}
+    ${toggleRow('Gap (Run plays)', state.showGap, "setShowGap(true)", "setShowGap(false)")}
+    ${toggleRow('Pass Zone (Pass plays)', state.showPassZone, "setShowPassZone(true)", "setShowPassZone(false)")}
   </div>
 
   <div class="card">
@@ -1349,6 +1442,7 @@ function renderSetupTab(){
     ${toggleRow('Coverage (Sky/Cloud/Lock/Trap)', state.showCoverage, "setShowCoverage(true)", "setShowCoverage(false)")}
     ${toggleRow('Stunt (Y/N)', state.showStunt, "setShowStunt(true)", "setShowStunt(false)")}
     ${toggleRow('Play Call (per Formation)', state.showDefPlay, "setShowDefPlay(true)", "setShowDefPlay(false)")}
+    ${toggleRow('Include Opponent Formations in list', state.showOppFormation, "setShowOppFormation(true)", "setShowOppFormation(false)")}
     <div class="hint" style="margin-top:0;">When a play is tagged Stunt = YES, a second set of tiles appears to pick the specific stunt/pressure call.</div>
   </div>
 
@@ -1456,6 +1550,21 @@ function renderSetupTab(){
     <div class="row-btns" style="margin-top:8px;">
       <button class="btn-primary" onclick="loadOppRoster()">Load Opponent Roster</button>
       <button class="btn-secondary" onclick="clearOppRoster()">Clear</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="section-label">Opponent Formations (Scouting)</div>
+    <div class="hint">
+      What THEY show on offense, from scouted film. These get mixed right into the same Formation picker on your Defense (D) snaps, alongside your own defensive calls (King/Queen/Trips/Pro) — one combined list, since either way you're just noting what formation was on the field.<br>
+      Same format as other playbooks: <code>Formation Name: Play A, Play B</code>. Plays are optional — a formation name alone with no colon works too.<br>
+      Pre-loaded with formations from film you've already shared: YOFF TRIPS, YOFF DEUCE, DEUCE SLIP — edit or replace these with whatever you're actually scouting.
+    </div>
+    <input type="file" accept=".txt,.csv" onchange="handleFileUpload(this,'oppPlaybookInput')" style="margin-bottom:8px; color:var(--muted); font-size:12px;">
+    <textarea id="oppPlaybookInput" placeholder="YOFF TRIPS: STRONG SPLIT ZONE DIVE, FADE-OUT-OUT/FADE&#10;YOFF DEUCE: SLANT-OUT/SLANT-OUT, DIG-SEAM/DIG-SEAM">${Object.keys(state.oppPlaybook).map(k=>`${k}: ${state.oppPlaybook[k].join(', ')}`).join('\n')}</textarea>
+    <div class="row-btns" style="margin-top:8px;">
+      <button class="btn-primary" onclick="loadOppPlaybook()">Load Opponent Formations</button>
+      <button class="btn-secondary" onclick="clearOppPlaybook()">Clear</button>
     </div>
   </div>`;
 
@@ -1594,6 +1703,14 @@ function renderExportTab(){
     <div style="display:flex; align-items:center; gap:8px; margin-top:8px;">
       <input type="checkbox" id="filterUnknownCheck" ${state.reviewFilterUnknown?'checked':''} onchange="toggleReviewFilterUnknown()">
       <label for="filterUnknownCheck" style="font-size:13px;">Show only rows with a "?" in them (${state.plays.filter(hasUnknownValue).length} found)</label>
+    </div>
+    <div style="margin-top:10px; font-size:12px; color:var(--muted); text-transform:uppercase; letter-spacing:.08em; font-weight:700;">Quarter</div>
+    <div class="filter-pill" style="width:fit-content; margin-top:4px; margin-bottom:8px;">
+      ${['All','1','2','3','4','OT'].map(q=>`<button class="${state.reviewFilterQuarter===q?'active':''}" onclick="setReviewFilterQuarter('${q}')">${q==='All'?'All':'Q'+q}</button>`).join('')}
+    </div>
+    <div style="font-size:12px; color:var(--muted); text-transform:uppercase; letter-spacing:.08em; font-weight:700;">Play Type</div>
+    <div class="filter-pill" style="width:fit-content; margin-top:4px;">
+      ${['All','Run','Pass','Turnovers'].map(t=>`<button class="${state.reviewFilterPlayType===t?'active':''}" onclick="setReviewFilterPlayType('${t}')">${t}</button>`).join('')}
     </div>
   </div>
 
@@ -1780,10 +1897,10 @@ function buildGameReportText(){
 }
 
 function buildCSVString(){
-  const headers = ['ODK','Formation','Play','Down','Distance','Gain','PlayType','Hash','Direction','ToStrength','ToBoundary','ToTE','ToFB','Motion','MotionToStrength','MotionToBoundary','Front','Coverage','Stunt','StuntCall','FoulBy','FoulType','PenaltyResult','SpotOfFoul','KickingTeam','Clock','YardLine','BallCarrier','Passer','Receiver','Tackler','Result','TD','Turnover','Safety','Notes','InternalODK','PendingReceiver','DrivingSide'];
+  const headers = ['PlayNum','Quarter','ODK','Formation','FormationStrength','BackLocation','Play','Down','Distance','Gain','PlayType','Hash','Direction','ToStrength','ToBoundary','ToTE','ToFB','Gap','PassZone','Motion','MotionToStrength','MotionToBoundary','Front','Coverage','Stunt','StuntCall','FoulBy','FoulType','PenaltyResult','SpotOfFoul','KickingTeam','ReturningTeam','Clock','YardLine','BallCarrier','Passer','Receiver','Tackler','Result','TD','Turnover','Safety','Notes','InternalODK','PendingReceiver','DrivingSide'];
   const lines = [headers.join(',')];
-  state.plays.forEach(p=>{
-    lines.push([hudlOdk(p),p.formation,p.play,p.down,p.distance,p.gain,p.playType,p.hash,p.direction,p.tostrength,p.toBoundary,p.toTE,p.toFB,p.motion,p.motionToStrength,p.motionToBoundary,p.front,p.coverage,p.stunt,p.stuntCall,p.foulBy,p.foulType,p.penaltyResult,p.spotOfFoul,p.kickingTeam,p.clock,p.yardLine,p.player,p.passer,p.receiver,p.tackler,p.result,p.isTD?'Y':'',p.isTurnover?'Y':'',p.isSafety?'Y':'',p.notes||'',p.odk,p.pendingReceiver||'',p.drivingSide||''].map(csvEscape).join(','));
+  state.plays.forEach((p,i)=>{
+    lines.push([i+1,p.quarter,hudlOdk(p),p.formation,p.formationStrength,p.backLocation,p.play,p.down,p.distance,p.gain,p.playType,p.hash,p.direction,p.tostrength,p.toBoundary,p.toTE,p.toFB,p.gap,p.passZone,p.motion,p.motionToStrength,p.motionToBoundary,p.front,p.coverage,p.stunt,p.stuntCall,p.foulBy,p.foulType,p.penaltyResult,p.spotOfFoul,p.kickingTeam,p.returningTeam,p.clock,p.yardLine,p.player,p.passer,p.receiver,p.tackler,p.result,p.isTD?'Y':'',p.isTurnover?'Y':'',p.isSafety?'Y':'',p.notes||'',p.odk,p.pendingReceiver||'',p.drivingSide||''].map(csvEscape).join(','));
   });
   return lines.join('\n');
 }
@@ -1795,7 +1912,10 @@ function buildDataDictionaryText(){
   lines.push('Reference for mapping columns during Hudl\'s own import step (Video > Library > Import Data).');
   lines.push('');
   lines.push('ODK — O = our offense, D = our defense (opponent has the ball), K = kicking situation, PAT = extra point/2pt attempt (exports as K for Hudl).');
-  lines.push('Formation — Offense: Right, Left, Roger, Larry, Other (or your uploaded playbook). Defense: King, Queen, Trips, Pro, Other (or your uploaded defensive playbook) — separate vocabulary from offense on purpose.');
+  lines.push('Formation — Offense: Right, Left, Roger, Larry, Other (or your uploaded playbook) — separate vocabulary from Defense on purpose. Defense: your own calls (King, Queen, Trips, Pro, or your uploaded defensive playbook) combined into one list with the opponents scouted formations (from Opponent Formations), since both answer "what formation is on the field" from different sides.');
+  lines.push('FormationStrength — R/L/?, which way the formation itself is set (a personnel/alignment property). Different from ToStrength, which is whether the run went toward it.');
+  lines.push('Gap — A/B/C/D/?, which gap a run play hit. Only shown on Run plays.');
+  lines.push('PassZone — 1-9/?, which zone a pass targeted. Only shown on Pass plays.');
   lines.push('Down / Distance — standard football down and yards to go.');
   lines.push('Gain — yards gained (negative for a loss).');
   lines.push('PlayType — Run, Pass, Sack, Penalty (offense/defense); Punt, Kickoff, FG, PAT, 2pt, Onside (kicking).');
@@ -2080,14 +2200,53 @@ const BATCH_EDIT_FIELDS = [
   {key:'stunt', label:'Stunt', options:['YES','NO','?']},
 ];
 
+// Parses free-text yard line ("OWN 25", "OPP 15", "LOG 40", "50", "MID") into a 0-100 field
+// position (0 = our own goal, 100 = opponent's goal). Accepts OWN/OPP or the actual team/opponent
+// name (or an abbreviation of it, matching how real Hudl-style play-by-play is usually written,
+// e.g. "LOG 40", "ONA 25"). Deliberately does NOT guess on a bare number with no zone marker --
+// that's genuinely ambiguous, and silently guessing would risk mislabeling a play's field position
+// with no indication anything was assumed. Consistent with this app's "?" philosophy: unclear stays
+// unclear rather than becoming a confident-looking wrong answer.
+function parseYardLineToFieldPosition(yardLine){
+  if(!yardLine) return null;
+  const clean = yardLine.toUpperCase().trim();
+  if(clean === '50' || clean === 'MID' || clean === 'MIDFIELD') return 50;
+  const opp = clean.match(/^OPP\.?\s*(\d+)$/);
+  if(opp) return 100 - parseInt(opp[1]);
+  const own = clean.match(/^OWN\.?\s*(\d+)$/);
+  if(own) return parseInt(own[1]);
+  const parts = clean.split(/\s+/);
+  if(parts.length === 2){
+    const [zone, ydsStr] = parts;
+    const yds = parseInt(ydsStr);
+    if(!isNaN(yds) && yds >= 0 && yds <= 50){
+      const teamU = (state.teamName||'').toUpperCase();
+      const oppU = (state.opponentName||'').toUpperCase();
+      if(zone.length >= 2 && teamU && (teamU.startsWith(zone) || zone.startsWith(teamU))) return yds;
+      if(zone.length >= 2 && oppU && (oppU.startsWith(zone) || zone.startsWith(oppU))) return 100 - yds;
+    }
+  }
+  return null;
+}
+function isRedZonePosition(pos){ return pos !== null && pos >= 80; }
+
 function hasUnknownValue(p){
   const fields = ['hash','direction','tostrength','toBoundary','toTE','toFB','motion','motionToStrength','motionToBoundary','front','coverage','stunt'];
   return fields.some(f => p[f] === '?');
 }
 function getReviewRows(){
-  return state.plays.map((p,i)=>({p,i})).filter(r => !state.reviewFilterUnknown || hasUnknownValue(r.p));
+  return state.plays.map((p,i)=>({p,i})).filter(r => {
+    if(state.reviewFilterUnknown && !hasUnknownValue(r.p)) return false;
+    if(state.reviewFilterQuarter !== 'All' && String(r.p.quarter) !== state.reviewFilterQuarter) return false;
+    if(state.reviewFilterPlayType === 'Pass' && r.p.playType !== 'Pass') return false;
+    if(state.reviewFilterPlayType === 'Run' && r.p.playType !== 'Run') return false;
+    if(state.reviewFilterPlayType === 'Turnovers' && !(r.p.isTurnover || r.p.isSafety)) return false;
+    return true;
+  });
 }
 function toggleReviewFilterUnknown(){ state.reviewFilterUnknown = !state.reviewFilterUnknown; render(); }
+function setReviewFilterQuarter(q){ state.reviewFilterQuarter = q; render(); }
+function setReviewFilterPlayType(t){ state.reviewFilterPlayType = t; render(); }
 function toggleReviewSelect(i){ state.reviewSelected[i] = !state.reviewSelected[i]; render(); }
 function reviewSelectAllVisible(){
   getReviewRows().forEach(r => { state.reviewSelected[r.i] = true; });
@@ -2114,29 +2273,42 @@ function importCSV(inputEl){
   reader.onload = e => {
     const lines = e.target.result.split('\n').map(l=>l.trim()).filter(Boolean);
     if(lines.length < 2){ alert('That file has no play rows to restore.'); return; }
+    // Map columns by header NAME rather than fixed position -- makes this robust against older
+    // exports (missing newer columns like PlayNum/Quarter) and any future column additions.
+    const headerRow = parseCSVLine(lines[0]);
+    const idx = {};
+    headerRow.forEach((h,i)=>{ idx[h] = i; });
+    const get = (c, name) => (idx[name]!==undefined && c[idx[name]]!==undefined) ? c[idx[name]] : '';
+
     const restored = lines.slice(1).map(line=>{
       const c = parseCSVLine(line);
-      const down = c[3]!==undefined && c[3]!=='' ? parseInt(c[3]) : null;
-      const distance = c[4]!==undefined && c[4]!=='' ? parseInt(c[4]) : null;
+      const downRaw = get(c,'Down');
+      const distRaw = get(c,'Distance');
+      const gainRaw = get(c,'Gain');
+      const down = downRaw!=='' ? parseInt(downRaw) : null;
+      const distance = distRaw!=='' ? parseInt(distRaw) : null;
       return {
-        // c[36] (InternalODK) preserves 'PAT' distinctly from the Hudl-mapped 'K' in c[0]; fall back to c[0] for older exports.
-        odk: c[36] || c[0] || '',
-        formation:c[1]||'', play:c[2]||'',
+        // InternalODK preserves 'PAT' distinctly from the Hudl-mapped 'K' in ODK; fall back to ODK for older exports.
+        odk: get(c,'InternalODK') || get(c,'ODK') || '',
+        formation: get(c,'Formation'), formationStrength: get(c,'FormationStrength'), backLocation: get(c,'BackLocation'), play: get(c,'Play'),
         down: isNaN(down) ? null : down,
         distance: isNaN(distance) ? null : distance,
-        gain: c[5]!==undefined && c[5]!=='' ? parseInt(c[5]) : undefined,
-        playType:c[6]||'', hash:c[7]||'', direction:c[8]||'', tostrength:c[9]||'',
-        toBoundary:c[10]||'', toTE:c[11]||'', toFB:c[12]||'',
-        motion:c[13]||'', motionToStrength:c[14]||'', motionToBoundary:c[15]||'',
-        front:c[16]||'', coverage:c[17]||'', stunt:c[18]||'', stuntCall:c[19]||'',
-        foulBy:c[20]||'', foulType:c[21]||'', penaltyResult:c[22]||'', spotOfFoul:c[23]||'',
-        kickingTeam:c[24]||'',
-        clock:c[25]||'', yardLine:c[26]||'',
-        player:c[27]||'', passer:c[28]||'', receiver:c[29]||'', tackler:c[30]||'',
-        result:c[31]||'', isTD: c[32]==='Y', isTurnover: c[33]==='Y', isSafety: c[34]==='Y',
-        notes: c[35] || '',
-        pendingReceiver: c[37] || null,
-        drivingSide: c[38] || null,
+        gain: gainRaw!=='' ? parseInt(gainRaw) : undefined,
+        playType: get(c,'PlayType'), hash: get(c,'Hash'), direction: get(c,'Direction'), tostrength: get(c,'ToStrength'),
+        toBoundary: get(c,'ToBoundary'), toTE: get(c,'ToTE'), toFB: get(c,'ToFB'),
+        gap: get(c,'Gap'), passZone: get(c,'PassZone'),
+        motion: get(c,'Motion'), motionToStrength: get(c,'MotionToStrength'), motionToBoundary: get(c,'MotionToBoundary'),
+        front: get(c,'Front'), coverage: get(c,'Coverage'), stunt: get(c,'Stunt'), stuntCall: get(c,'StuntCall'),
+        foulBy: get(c,'FoulBy'), foulType: get(c,'FoulType'), penaltyResult: get(c,'PenaltyResult'), spotOfFoul: get(c,'SpotOfFoul'),
+        kickingTeam: get(c,'KickingTeam'),
+        returningTeam: get(c,'ReturningTeam'),
+        clock: get(c,'Clock'), yardLine: get(c,'YardLine'),
+        player: get(c,'BallCarrier'), passer: get(c,'Passer'), receiver: get(c,'Receiver'), tackler: get(c,'Tackler'),
+        result: get(c,'Result'), isTD: get(c,'TD')==='Y', isTurnover: get(c,'Turnover')==='Y', isSafety: get(c,'Safety')==='Y',
+        notes: get(c,'Notes'),
+        quarter: get(c,'Quarter') || '1', // older exports had no Quarter column -- default to 1 rather than leaving it blank
+        pendingReceiver: get(c,'PendingReceiver') || null,
+        drivingSide: get(c,'DrivingSide') || null,
       };
     });
     state.plays = restored;
