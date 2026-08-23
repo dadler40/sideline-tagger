@@ -210,11 +210,11 @@ const state = {
     DEF: ["2 Viktor Kravanja","3 Emerson King","5 Ryan Thurman","6 Onesimus West","7 Ontario Robbins","8 Tait Hatlevig","9 Travaun Kuntu-Porter","11 Wesley Cornett","12 David Wilson","14 Marques Simmons-Jackson","17 Haden Brubaker","19 Montrill Keys","21 Braylen McKee","22 Rock West","24 Mason Welch","25 Ashton Bell","26 Amari'on Miles","29 Sky Lemoine","32 Apollo Xiong","33 Robert Gordon","34 Da'Roc Bell","35 Kaverick Stanton","36 Nathaniel May","42 Maxwell Woodward","50 Porter Wilson","51 Ivan Ystenes","52 Justice Parcher","53 Landon Hales","54 Jared Schirm","57 Kayden Lor","62 Brooks Schaffer","67 Eli Hanan","68 Braydon Blum","70 Evan Lin","71 Xander Johnson","74 Owen Crammond","75 Aspen Vue-Wing","77 Jesse Lycke","78 George Lundebrek","79 Owen Bundy","80 Jameson Brice","84 Adema (AC) Van Rooyen","85 Riley Hatlevig","89 Odin Evenson","90 Zamari Taylor"],
   },
   oppRoster: {
-    QB: ["2 Camdyn Rye","8 Xander Klein","84 Titus DeMoss"],
-    RB: ["13 Spencer Pearson","33 Cash Ryan Seefeldt","83 Chace Cerny"],
-    WR: ["1 Tanner Kostroski","5 Henry Maahs","7 Reid Bodenheimer","9 Anders Bjerke","11 Trevor Kell","12 Liam Hull","15 Ethan Loppnow","23 Will Guelzow","36 Cooper Schmitt","87 Eli Hoenisch","88 Logan Haase"],
-    TE: ["47 Aiden Kilde"],
-  }, // { "RB": ["3 David Irvin", ...], "QB":[...], "WR":[...] } -- editable each week, opponent's own players
+    QB: ["2","8","84"],
+    RB: ["13","33","83"],
+    WR: ["1","5","7","9","11","12","15","23","36","87","88"],
+    TE: ["47"],
+  }, // { "RB": ["3 David Irvin", ...], "QB":[...], "WR":[...] } -- editable each week, opponent's own players. Per standing preference: skill positions only, jersey numbers only, no names.
   // Opponent's OWN offensive formations/plays -- what THEY show, from scouted film. Separate from our
   // own defensive calls (King/Queen/Trips/Pro), which describe what WE do, not what they do.
   oppPlaybook: {
@@ -4850,6 +4850,8 @@ function wausauPrev(){ if(state.wausauReviewIndex > 0) state.wausauReviewIndex--
 function isWausauPlayFinished(p){
   if(!p.backLocation) return false;
   if(p.playType === 'Run' && (!p.runToFullback || !p.runnerType)) return false;
+  if(p.runnerType === 'RB' && !p.qbRunFake) return false;
+  if(p.formation === 'Z WING' && !p.toZSide) return false;
   return true;
 }
 function wausauJumpToNextUnfinished(){
@@ -4895,8 +4897,8 @@ function renderWausauScoutTab(){
   const supplementedCount = state.plays.filter(isWausauPlayFinished).length;
 
   let html = `<div class="card" style="border-color:var(--amber);">
-    <div class="section-label" style="color:var(--amber);">Wausau East Scout — Play ${idx+1} of ${total} <span style="color:var(--text); font-weight:400;">(CSV Play #${p.originalPlayNum ?? '?'})</span></div>
-    <div class="hint" style="margin-top:0;">${supplementedCount} of ${total} plays fully supplemented. Everything else here is already known from film — just add Back Alignment (and, on run plays, Fullback Side + QB/RB) and move to the next play.</div>
+    <div class="section-label" style="color:var(--amber);">Wausau East Scout — CSV Play #${p.originalPlayNum ?? '?'} <span style="color:var(--text); font-weight:400;">(${idx+1} of ${total} loaded)</span></div>
+    <div class="hint" style="margin-top:0;">${supplementedCount} of ${total} plays fully supplemented. Everything else here is already known from film — just add Back Alignment (and, on run plays, To FB Blocking Direction + QB/RB) and move to the next play.</div>
     <div class="row-btns">
       <button class="btn-secondary" ${idx===0?'disabled':''} onclick="wausauPrev()">&larr; Previous</button>
       <button class="btn-secondary" ${idx===total-1?'disabled':''} onclick="wausauNext()">Next &rarr;</button>
@@ -4928,13 +4930,22 @@ function renderWausauScoutTab(){
   <div class="card">
     <div class="section-label">Add: Back Alignment</div>
     <div class="grid">
-      ${['Left','Pistol','Right','?'].map(v=>`<button class="tile small ${p.backLocation===v?'selected':''}" onclick="setWausauField('backLocation','${v}')">${v}</button>`).join('')}
+      ${['DEF. L','Pistol','DEF. R','?'].map(v=>`<button class="tile small ${p.backLocation===v?'selected':''}" onclick="setWausauField('backLocation','${v}')">${v}</button>`).join('')}
     </div>
   </div>
 
+  ${p.formation === 'Z WING' ? `
+  <div class="card">
+    <div class="section-label">Add: TO Z SIDE</div>
+    <div class="grid">
+      ${['Yes','No','?'].map(v=>`<button class="tile small ${p.toZSide===v?'selected':''}" onclick="setWausauField('toZSide','${v}')">${v}</button>`).join('')}
+    </div>
+  </div>
+  ` : ''}
+
   ${p.playType === 'Run' ? `
   <div class="card">
-    <div class="section-label">Add: Run To Fullback Side</div>
+    <div class="section-label">Add: TO FB BLOCKING DIRECTION</div>
     <div class="grid">
       ${['Yes','No','No FB this play','?'].map(v=>`<button class="tile small ${p.runToFullback===v?'selected':''}" onclick="setWausauField('runToFullback','${v}')">${v}</button>`).join('')}
     </div>
@@ -4945,9 +4956,18 @@ function renderWausauScoutTab(){
       ${['QB','RB','?'].map(v=>`<button class="tile small ${p.runnerType===v?'selected':''}" onclick="setWausauField('runnerType','${v}')">${v}</button>`).join('')}
     </div>
   </div>
+  ${p.runnerType === 'RB' ? `
+  <div class="card">
+    <div class="section-label">Add: QB RUN FAKE</div>
+    <div class="hint" style="margin-top:0;">Is there a chance the QB pulls/keeps on this look?</div>
+    <div class="grid">
+      ${['Yes','No','?'].map(v=>`<button class="tile small ${p.qbRunFake===v?'selected':''}" onclick="setWausauField('qbRunFake','${v}')">${v}</button>`).join('')}
+    </div>
+  </div>
+  ` : ''}
   ` : `
   <div class="card">
-    <div class="section-label">Run To Fullback Side / QB or RB</div>
+    <div class="section-label">TO FB BLOCKING DIRECTION / QB or RB</div>
     <div class="hint" style="margin-top:0;">N/A — not a run play.</div>
   </div>
   `}
@@ -5381,10 +5401,10 @@ function buildGameReportText(){
 }
 
 function buildCSVString(){
-  const headers = ['PlayNum','OriginalPlayNum','Quarter','ODK','Formation','FormationStrength','BackLocation','BackLocationStart','BackLocationEnd','HBackSlice','RunToFullback','RunnerType','Play','Down','Distance','Gain','PlayType','Hash','Direction','ToStrength','ToBoundary','ToTE','ToFB','Gap','PassZone','Motion','MotionDirection','MotionBy','MotionToStrength','MotionToBoundary','Front','Coverage','Stunt','StuntCall','FoulBy','FoulType','PenaltyResult','SpotOfFoul','KickingTeam','ReturningTeam','Clock','YardLine','BallCarrier','Passer','Receiver','Tackler','Result','TD','Turnover','Safety','Notes','InternalODK','PendingReceiver','DrivingSide'];
+  const headers = ['PlayNum','OriginalPlayNum','Quarter','ODK','Formation','FormationStrength','BackLocation','BackLocationStart','BackLocationEnd','HBackSlice','RunToFullback','RunnerType','QBRunFake','ToZSide','Play','Down','Distance','Gain','PlayType','Hash','Direction','ToStrength','ToBoundary','ToTE','ToFB','Gap','PassZone','Motion','MotionDirection','MotionBy','MotionToStrength','MotionToBoundary','Front','Coverage','Stunt','StuntCall','FoulBy','FoulType','PenaltyResult','SpotOfFoul','KickingTeam','ReturningTeam','Clock','YardLine','BallCarrier','Passer','Receiver','Tackler','Result','TD','Turnover','Safety','Notes','InternalODK','PendingReceiver','DrivingSide'];
   const lines = [headers.join(',')];
   state.plays.forEach((p,i)=>{
-    lines.push([i+1,p.originalPlayNum??'',p.quarter,hudlOdk(p),p.formation,p.formationStrength,p.backLocation,p.backLocationStart,p.backLocationEnd,p.hBackSlice,p.runToFullback,p.runnerType,p.play,p.down,p.distance,p.gain,p.playType,p.hash,p.direction,p.tostrength,p.toBoundary,p.toTE,p.toFB,p.gap,p.passZone,p.motion,p.motionDirection,p.motionBy,p.motionToStrength,p.motionToBoundary,p.front,p.coverage,p.stunt,p.stuntCall,p.foulBy,p.foulType,p.penaltyResult,p.spotOfFoul,p.kickingTeam,p.returningTeam,p.clock,p.yardLine,p.player,p.passer,p.receiver,p.tackler,p.result,p.isTD?'Y':'',p.isTurnover?'Y':'',p.isSafety?'Y':'',p.notes||'',p.odk,p.pendingReceiver||'',p.drivingSide||''].map(csvEscape).join(','));
+    lines.push([i+1,p.originalPlayNum??'',p.quarter,hudlOdk(p),p.formation,p.formationStrength,p.backLocation,p.backLocationStart,p.backLocationEnd,p.hBackSlice,p.runToFullback,p.runnerType,p.qbRunFake,p.toZSide,p.play,p.down,p.distance,p.gain,p.playType,p.hash,p.direction,p.tostrength,p.toBoundary,p.toTE,p.toFB,p.gap,p.passZone,p.motion,p.motionDirection,p.motionBy,p.motionToStrength,p.motionToBoundary,p.front,p.coverage,p.stunt,p.stuntCall,p.foulBy,p.foulType,p.penaltyResult,p.spotOfFoul,p.kickingTeam,p.returningTeam,p.clock,p.yardLine,p.player,p.passer,p.receiver,p.tackler,p.result,p.isTD?'Y':'',p.isTurnover?'Y':'',p.isSafety?'Y':'',p.notes||'',p.odk,p.pendingReceiver||'',p.drivingSide||''].map(csvEscape).join(','));
   });
   return lines.join('\n');
 }
@@ -5788,7 +5808,7 @@ function importCSV(inputEl){
       return {
         // InternalODK preserves 'PAT' distinctly from the Hudl-mapped 'K' in ODK; fall back to ODK for older exports.
         odk: get(c,'InternalODK') || get(c,'ODK') || '',
-        formation: get(c,'Formation'), formationStrength: get(c,'FormationStrength'), backLocation: get(c,'BackLocation'), backLocationStart: get(c,'BackLocationStart'), backLocationEnd: get(c,'BackLocationEnd'), hBackSlice: get(c,'HBackSlice'), runToFullback: get(c,'RunToFullback'), runnerType: get(c,'RunnerType'), originalPlayNum: get(c,'OriginalPlayNum') ? parseInt(get(c,'OriginalPlayNum')) : undefined, play: get(c,'Play'),
+        formation: get(c,'Formation'), formationStrength: get(c,'FormationStrength'), backLocation: get(c,'BackLocation'), backLocationStart: get(c,'BackLocationStart'), backLocationEnd: get(c,'BackLocationEnd'), hBackSlice: get(c,'HBackSlice'), runToFullback: get(c,'RunToFullback'), runnerType: get(c,'RunnerType'), qbRunFake: get(c,'QBRunFake'), toZSide: get(c,'ToZSide'), originalPlayNum: get(c,'OriginalPlayNum') ? parseInt(get(c,'OriginalPlayNum')) : undefined, play: get(c,'Play'),
         down: isNaN(down) ? null : down,
         distance: isNaN(distance) ? null : distance,
         gain: gainRaw!=='' ? parseInt(gainRaw) : undefined,
