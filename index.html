@@ -209,7 +209,12 @@ const state = {
     FB: ["0 Sam King"],
     DEF: ["2 Viktor Kravanja","3 Emerson King","5 Ryan Thurman","6 Onesimus West","7 Ontario Robbins","8 Tait Hatlevig","9 Travaun Kuntu-Porter","11 Wesley Cornett","12 David Wilson","14 Marques Simmons-Jackson","17 Haden Brubaker","19 Montrill Keys","21 Braylen McKee","22 Rock West","24 Mason Welch","25 Ashton Bell","26 Amari'on Miles","29 Sky Lemoine","32 Apollo Xiong","33 Robert Gordon","34 Da'Roc Bell","35 Kaverick Stanton","36 Nathaniel May","42 Maxwell Woodward","50 Porter Wilson","51 Ivan Ystenes","52 Justice Parcher","53 Landon Hales","54 Jared Schirm","57 Kayden Lor","62 Brooks Schaffer","67 Eli Hanan","68 Braydon Blum","70 Evan Lin","71 Xander Johnson","74 Owen Crammond","75 Aspen Vue-Wing","77 Jesse Lycke","78 George Lundebrek","79 Owen Bundy","80 Jameson Brice","84 Adema (AC) Van Rooyen","85 Riley Hatlevig","89 Odin Evenson","90 Zamari Taylor"],
   },
-  oppRoster: {}, // { "RB": ["3 David Irvin", ...], "QB":[...], "WR":[...] } -- editable each week, opponent's own players
+  oppRoster: {
+    QB: ["2 Camdyn Rye","8 Xander Klein","84 Titus DeMoss"],
+    RB: ["13 Spencer Pearson","33 Cash Ryan Seefeldt","83 Chace Cerny"],
+    WR: ["1 Tanner Kostroski","5 Henry Maahs","7 Reid Bodenheimer","9 Anders Bjerke","11 Trevor Kell","12 Liam Hull","15 Ethan Loppnow","23 Will Guelzow","36 Cooper Schmitt","87 Eli Hoenisch","88 Logan Haase"],
+    TE: ["47 Aiden Kilde"],
+  }, // { "RB": ["3 David Irvin", ...], "QB":[...], "WR":[...] } -- editable each week, opponent's own players
   // Opponent's OWN offensive formations/plays -- what THEY show, from scouted film. Separate from our
   // own defensive calls (King/Queen/Trips/Pro), which describe what WE do, not what they do.
   oppPlaybook: {
@@ -236,6 +241,7 @@ const state = {
     "backLocation": "",
     "runToFullback": "",
     "runnerType": "",
+    "originalPlayNum": 6,
     "play": "STRONG 100 POWER",
     "down": 1,
     "distance": 10,
@@ -287,6 +293,7 @@ const state = {
     "backLocation": "",
     "runToFullback": "",
     "runnerType": "",
+    "originalPlayNum": 7,
     "play": "WEAK ZONE DIVE",
     "down": 1,
     "distance": 10,
@@ -338,6 +345,7 @@ const state = {
     "backLocation": "",
     "runToFullback": "",
     "runnerType": "",
+    "originalPlayNum": 9,
     "play": "STRONG 100 POWER",
     "down": 1,
     "distance": 20,
@@ -389,6 +397,7 @@ const state = {
     "backLocation": "",
     "runToFullback": "",
     "runnerType": "",
+    "originalPlayNum": 10,
     "play": "STRONG ZONE READ KEEP",
     "down": 2,
     "distance": 11,
@@ -440,6 +449,7 @@ const state = {
     "backLocation": "",
     "runToFullback": "",
     "runnerType": "",
+    "originalPlayNum": 11,
     "play": "WEAK ZONE DIVE",
     "down": 1,
     "distance": 10,
@@ -491,6 +501,7 @@ const state = {
     "backLocation": "",
     "runToFullback": "",
     "runnerType": "",
+    "originalPlayNum": 12,
     "play": "X QUICK SCREEN",
     "down": 2,
     "distance": 7,
@@ -542,6 +553,7 @@ const state = {
     "backLocation": "",
     "runToFullback": "",
     "runnerType": "",
+    "originalPlayNum": 13,
     "play": "STRONG DIVE",
     "down": 1,
     "distance": 2,
@@ -593,6 +605,7 @@ const state = {
     "backLocation": "",
     "runToFullback": "",
     "runnerType": "",
+    "originalPlayNum": 26,
     "play": "STRONG BOOT TE CORNER (LEVELS)",
     "down": 1,
     "distance": 10,
@@ -644,6 +657,7 @@ const state = {
     "backLocation": "",
     "runToFullback": "",
     "runnerType": "",
+    "originalPlayNum": 27,
     "play": "STRONG ZONE READ DIVE",
     "down": 2,
     "distance": 10,
@@ -695,6 +709,7 @@ const state = {
     "backLocation": "",
     "runToFullback": "",
     "runnerType": "",
+    "originalPlayNum": 28,
     "play": "SLANT-OUT/SLANT-OUT",
     "down": 3,
     "distance": 11,
@@ -746,6 +761,7 @@ const state = {
     "backLocation": "",
     "runToFullback": "",
     "runnerType": "",
+    "originalPlayNum": 34,
     "play": "STRONG DUO",
     "down": 1,
     "distance": 10,
@@ -797,6 +813,7 @@ const state = {
     "backLocation": "",
     "runToFullback": "",
     "runnerType": "",
+    "originalPlayNum": 35,
     "play": "WEAK POWER STRETCH GIVE",
     "down": 2,
     "distance": 9,
@@ -848,6 +865,7 @@ const state = {
     "backLocation": "",
     "runToFullback": "",
     "runnerType": "",
+    "originalPlayNum": 36,
     "play": "HITCHES/HITCHES",
     "down": 3,
     "distance": 6,
@@ -899,6 +917,7 @@ const state = {
     "backLocation": "",
     "runToFullback": "",
     "runnerType": "",
+    "originalPlayNum": 37,
     "play": "WEAK ZONE READ DIVE",
     "down": 1,
     "distance": 10,
@@ -950,6 +969,7 @@ const state = {
     "backLocation": "",
     "runToFullback": "",
     "runnerType": "",
+    "originalPlayNum": 38,
     "play": "STRONG 100 POWER",
     "down": 2,
     "distance": 2,
@@ -1001,6 +1021,7 @@ const state = {
     "backLocation": "",
     "runToFullback": "",
     "runnerType": "",
+    "originalPlayNum": 40,
     "play": "NOW-INSIDE FADE/BUBBLE-FADE",
     "down": 1,
     "distance": 10,
@@ -1052,6 +1073,7 @@ const state = {
     "backLocation": "",
     "runToFullback": "",
     "runnerType": "",
+    "originalPlayNum": 41,
     "play": "STRONG ZONE READ DIVE",
     "down": 2,
     "distance": 10,
@@ -1103,6 +1125,7 @@ const state = {
     "backLocation": "",
     "runToFullback": "",
     "runnerType": "",
+    "originalPlayNum": 42,
     "play": "FAKE JET BOOT TE CORNER (LEVELS)",
     "down": 3,
     "distance": 10,
@@ -1154,6 +1177,7 @@ const state = {
     "backLocation": "",
     "runToFullback": "",
     "runnerType": "",
+    "originalPlayNum": 43,
     "play": "STRONG DUO",
     "down": 1,
     "distance": 10,
@@ -1205,6 +1229,7 @@ const state = {
     "backLocation": "",
     "runToFullback": "",
     "runnerType": "",
+    "originalPlayNum": 44,
     "play": "WEAK SPLIT DUO",
     "down": 2,
     "distance": 5,
@@ -1256,6 +1281,7 @@ const state = {
     "backLocation": "",
     "runToFullback": "",
     "runnerType": "",
+    "originalPlayNum": 45,
     "play": "STRONG DUO",
     "down": 3,
     "distance": 2,
@@ -1307,6 +1333,7 @@ const state = {
     "backLocation": "",
     "runToFullback": "",
     "runnerType": "",
+    "originalPlayNum": 46,
     "play": "DOUBLE POST MESH",
     "down": 4,
     "distance": 3,
@@ -1358,6 +1385,7 @@ const state = {
     "backLocation": "",
     "runToFullback": "",
     "runnerType": "",
+    "originalPlayNum": 52,
     "play": "STRONG DUO",
     "down": 1,
     "distance": 10,
@@ -1409,6 +1437,7 @@ const state = {
     "backLocation": "",
     "runToFullback": "",
     "runnerType": "",
+    "originalPlayNum": 53,
     "play": "FAKE JET BOOT TE CORNER (LEVELS)",
     "down": 2,
     "distance": 7,
@@ -1460,6 +1489,7 @@ const state = {
     "backLocation": "",
     "runToFullback": "",
     "runnerType": "",
+    "originalPlayNum": 54,
     "play": "FADE-CROSS-SEAM/POST-WHEEL",
     "down": 3,
     "distance": 14,
@@ -1511,6 +1541,7 @@ const state = {
     "backLocation": "",
     "runToFullback": "",
     "runnerType": "",
+    "originalPlayNum": 59,
     "play": "STRONG ZONE READ KEEP",
     "down": 1,
     "distance": 10,
@@ -1562,6 +1593,7 @@ const state = {
     "backLocation": "",
     "runToFullback": "",
     "runnerType": "",
+    "originalPlayNum": 60,
     "play": "WEAK DIVE",
     "down": 1,
     "distance": 2,
@@ -1613,6 +1645,7 @@ const state = {
     "backLocation": "",
     "runToFullback": "",
     "runnerType": "",
+    "originalPlayNum": 71,
     "play": "STRONG DUO",
     "down": 1,
     "distance": 10,
@@ -1664,6 +1697,7 @@ const state = {
     "backLocation": "",
     "runToFullback": "",
     "runnerType": "",
+    "originalPlayNum": 73,
     "play": "",
     "down": 1,
     "distance": 10,
@@ -1715,6 +1749,7 @@ const state = {
     "backLocation": "",
     "runToFullback": "",
     "runnerType": "",
+    "originalPlayNum": 74,
     "play": "WEAK ZONE READ KEEP",
     "down": 1,
     "distance": 15,
@@ -1766,6 +1801,7 @@ const state = {
     "backLocation": "",
     "runToFullback": "",
     "runnerType": "",
+    "originalPlayNum": 75,
     "play": "",
     "down": 3,
     "distance": 5,
@@ -1817,6 +1853,7 @@ const state = {
     "backLocation": "",
     "runToFullback": "",
     "runnerType": "",
+    "originalPlayNum": 76,
     "play": "",
     "down": 1,
     "distance": 10,
@@ -1868,6 +1905,7 @@ const state = {
     "backLocation": "",
     "runToFullback": "",
     "runnerType": "",
+    "originalPlayNum": 77,
     "play": "",
     "down": 2,
     "distance": 6,
@@ -1919,6 +1957,7 @@ const state = {
     "backLocation": "",
     "runToFullback": "",
     "runnerType": "",
+    "originalPlayNum": 78,
     "play": "",
     "down": 3,
     "distance": 6,
@@ -1970,6 +2009,7 @@ const state = {
     "backLocation": "",
     "runToFullback": "",
     "runnerType": "",
+    "originalPlayNum": 79,
     "play": "",
     "down": 1,
     "distance": 10,
@@ -2021,6 +2061,7 @@ const state = {
     "backLocation": "",
     "runToFullback": "",
     "runnerType": "",
+    "originalPlayNum": 80,
     "play": "",
     "down": 2,
     "distance": 8,
@@ -2072,6 +2113,7 @@ const state = {
     "backLocation": "",
     "runToFullback": "",
     "runnerType": "",
+    "originalPlayNum": 81,
     "play": "",
     "down": 3,
     "distance": 8,
@@ -2123,6 +2165,7 @@ const state = {
     "backLocation": "",
     "runToFullback": "",
     "runnerType": "",
+    "originalPlayNum": 83,
     "play": "",
     "down": 3,
     "distance": 13,
@@ -2174,6 +2217,7 @@ const state = {
     "backLocation": "",
     "runToFullback": "",
     "runnerType": "",
+    "originalPlayNum": 97,
     "play": "",
     "down": 1,
     "distance": 10,
@@ -2225,6 +2269,7 @@ const state = {
     "backLocation": "",
     "runToFullback": "",
     "runnerType": "",
+    "originalPlayNum": 98,
     "play": "",
     "down": 2,
     "distance": 5,
@@ -2276,6 +2321,7 @@ const state = {
     "backLocation": "",
     "runToFullback": "",
     "runnerType": "",
+    "originalPlayNum": 99,
     "play": "",
     "down": 3,
     "distance": 1,
@@ -2327,6 +2373,7 @@ const state = {
     "backLocation": "",
     "runToFullback": "",
     "runnerType": "",
+    "originalPlayNum": 100,
     "play": "",
     "down": 1,
     "distance": 10,
@@ -2378,6 +2425,7 @@ const state = {
     "backLocation": "",
     "runToFullback": "",
     "runnerType": "",
+    "originalPlayNum": 101,
     "play": "",
     "down": 2,
     "distance": 7,
@@ -2429,6 +2477,7 @@ const state = {
     "backLocation": "",
     "runToFullback": "",
     "runnerType": "",
+    "originalPlayNum": 102,
     "play": "",
     "down": 3,
     "distance": 1,
@@ -2480,6 +2529,7 @@ const state = {
     "backLocation": "",
     "runToFullback": "",
     "runnerType": "",
+    "originalPlayNum": 103,
     "play": "",
     "down": 1,
     "distance": 10,
@@ -2531,6 +2581,7 @@ const state = {
     "backLocation": "",
     "runToFullback": "",
     "runnerType": "",
+    "originalPlayNum": 104,
     "play": "",
     "down": 2,
     "distance": 6,
@@ -2582,6 +2633,7 @@ const state = {
     "backLocation": "",
     "runToFullback": "",
     "runnerType": "",
+    "originalPlayNum": 105,
     "play": "",
     "down": 3,
     "distance": 6,
@@ -2633,6 +2685,7 @@ const state = {
     "backLocation": "",
     "runToFullback": "",
     "runnerType": "",
+    "originalPlayNum": 106,
     "play": "",
     "down": 4,
     "distance": 1,
@@ -2684,6 +2737,7 @@ const state = {
     "backLocation": "",
     "runToFullback": "",
     "runnerType": "",
+    "originalPlayNum": 107,
     "play": "",
     "down": 1,
     "distance": 10,
@@ -2735,6 +2789,7 @@ const state = {
     "backLocation": "",
     "runToFullback": "",
     "runnerType": "",
+    "originalPlayNum": 108,
     "play": "",
     "down": 1,
     "distance": 15,
@@ -2786,6 +2841,7 @@ const state = {
     "backLocation": "",
     "runToFullback": "",
     "runnerType": "",
+    "originalPlayNum": 109,
     "play": "",
     "down": 2,
     "distance": 11,
@@ -2837,6 +2893,7 @@ const state = {
     "backLocation": "",
     "runToFullback": "",
     "runnerType": "",
+    "originalPlayNum": 110,
     "play": "",
     "down": 1,
     "distance": 10,
@@ -2888,6 +2945,7 @@ const state = {
     "backLocation": "",
     "runToFullback": "",
     "runnerType": "",
+    "originalPlayNum": 111,
     "play": "",
     "down": 2,
     "distance": 10,
@@ -2939,6 +2997,7 @@ const state = {
     "backLocation": "",
     "runToFullback": "",
     "runnerType": "",
+    "originalPlayNum": 112,
     "play": "",
     "down": 3,
     "distance": 4,
@@ -2990,6 +3049,7 @@ const state = {
     "backLocation": "",
     "runToFullback": "",
     "runnerType": "",
+    "originalPlayNum": 123,
     "play": "",
     "down": 1,
     "distance": 10,
@@ -3041,6 +3101,7 @@ const state = {
     "backLocation": "",
     "runToFullback": "",
     "runnerType": "",
+    "originalPlayNum": 124,
     "play": "",
     "down": 2,
     "distance": 4,
@@ -3092,6 +3153,7 @@ const state = {
     "backLocation": "",
     "runToFullback": "",
     "runnerType": "",
+    "originalPlayNum": 125,
     "play": "",
     "down": 3,
     "distance": 3,
@@ -3143,6 +3205,7 @@ const state = {
     "backLocation": "",
     "runToFullback": "",
     "runnerType": "",
+    "originalPlayNum": 126,
     "play": "",
     "down": 4,
     "distance": 5,
@@ -3194,6 +3257,7 @@ const state = {
     "backLocation": "",
     "runToFullback": "",
     "runnerType": "",
+    "originalPlayNum": 133,
     "play": "",
     "down": 1,
     "distance": 10,
@@ -3245,6 +3309,7 @@ const state = {
     "backLocation": "",
     "runToFullback": "",
     "runnerType": "",
+    "originalPlayNum": 134,
     "play": "",
     "down": 2,
     "distance": 11,
@@ -3289,7 +3354,7 @@ const state = {
     "quarter": "4",
     "drivingSide": "O"
   }
-],          // pre-loaded with real Wausau East scouting data (60 offensive plays) for this week's Wausau East Scout tab
+],          // pre-loaded with real Wausau East scouting data (60 offensive plays), including original Hudl PLAY # for cross-referencing
   cur: {},            // in-progress selections
   tab: 'wausau',
   scoutReviewIndex: 0,
@@ -4795,6 +4860,15 @@ function wausauJumpToNextUnfinished(){
   }
   render();
 }
+function wausauJumpToCSVPlay(){
+  const input = document.getElementById('wausauCSVJumpInput');
+  const target = parseInt(input.value);
+  if(isNaN(target)){ alert('Enter a valid CSV Play # to jump to.'); return; }
+  const idx = state.plays.findIndex(p => p.originalPlayNum === target);
+  if(idx === -1){ alert(`CSV Play #${target} isn't one of the offensive plays loaded here.`); return; }
+  state.wausauReviewIndex = idx;
+  render();
+}
 function setWausauField(field, value){
   const p = state.plays[state.wausauReviewIndex];
   if(!p) return;
@@ -4821,13 +4895,17 @@ function renderWausauScoutTab(){
   const supplementedCount = state.plays.filter(isWausauPlayFinished).length;
 
   let html = `<div class="card" style="border-color:var(--amber);">
-    <div class="section-label" style="color:var(--amber);">Wausau East Scout — Play ${idx+1} of ${total}</div>
+    <div class="section-label" style="color:var(--amber);">Wausau East Scout — Play ${idx+1} of ${total} <span style="color:var(--text); font-weight:400;">(CSV Play #${p.originalPlayNum ?? '?'})</span></div>
     <div class="hint" style="margin-top:0;">${supplementedCount} of ${total} plays fully supplemented. Everything else here is already known from film — just add Back Alignment (and, on run plays, Fullback Side + QB/RB) and move to the next play.</div>
     <div class="row-btns">
       <button class="btn-secondary" ${idx===0?'disabled':''} onclick="wausauPrev()">&larr; Previous</button>
       <button class="btn-secondary" ${idx===total-1?'disabled':''} onclick="wausauNext()">Next &rarr;</button>
     </div>
     <button class="undo-btn" style="width:100%; margin-top:8px; color:var(--text);" onclick="wausauJumpToNextUnfinished()">Jump to Next Unfinished Play</button>
+    <div style="display:flex; gap:8px; align-items:center; margin-top:8px;">
+      <input type="number" id="wausauCSVJumpInput" placeholder="Jump to CSV Play #" style="flex:1; padding:12px; border-radius:10px; border:1px solid var(--line); background:var(--panel); color:var(--text); font-size:14px;">
+      <button class="tile small" style="width:70px;" onclick="wausauJumpToCSVPlay()">Go</button>
+    </div>
   </div>
 
   <div class="card">
@@ -5303,10 +5381,10 @@ function buildGameReportText(){
 }
 
 function buildCSVString(){
-  const headers = ['PlayNum','Quarter','ODK','Formation','FormationStrength','BackLocation','BackLocationStart','BackLocationEnd','HBackSlice','RunToFullback','RunnerType','Play','Down','Distance','Gain','PlayType','Hash','Direction','ToStrength','ToBoundary','ToTE','ToFB','Gap','PassZone','Motion','MotionDirection','MotionBy','MotionToStrength','MotionToBoundary','Front','Coverage','Stunt','StuntCall','FoulBy','FoulType','PenaltyResult','SpotOfFoul','KickingTeam','ReturningTeam','Clock','YardLine','BallCarrier','Passer','Receiver','Tackler','Result','TD','Turnover','Safety','Notes','InternalODK','PendingReceiver','DrivingSide'];
+  const headers = ['PlayNum','OriginalPlayNum','Quarter','ODK','Formation','FormationStrength','BackLocation','BackLocationStart','BackLocationEnd','HBackSlice','RunToFullback','RunnerType','Play','Down','Distance','Gain','PlayType','Hash','Direction','ToStrength','ToBoundary','ToTE','ToFB','Gap','PassZone','Motion','MotionDirection','MotionBy','MotionToStrength','MotionToBoundary','Front','Coverage','Stunt','StuntCall','FoulBy','FoulType','PenaltyResult','SpotOfFoul','KickingTeam','ReturningTeam','Clock','YardLine','BallCarrier','Passer','Receiver','Tackler','Result','TD','Turnover','Safety','Notes','InternalODK','PendingReceiver','DrivingSide'];
   const lines = [headers.join(',')];
   state.plays.forEach((p,i)=>{
-    lines.push([i+1,p.quarter,hudlOdk(p),p.formation,p.formationStrength,p.backLocation,p.backLocationStart,p.backLocationEnd,p.hBackSlice,p.runToFullback,p.runnerType,p.play,p.down,p.distance,p.gain,p.playType,p.hash,p.direction,p.tostrength,p.toBoundary,p.toTE,p.toFB,p.gap,p.passZone,p.motion,p.motionDirection,p.motionBy,p.motionToStrength,p.motionToBoundary,p.front,p.coverage,p.stunt,p.stuntCall,p.foulBy,p.foulType,p.penaltyResult,p.spotOfFoul,p.kickingTeam,p.returningTeam,p.clock,p.yardLine,p.player,p.passer,p.receiver,p.tackler,p.result,p.isTD?'Y':'',p.isTurnover?'Y':'',p.isSafety?'Y':'',p.notes||'',p.odk,p.pendingReceiver||'',p.drivingSide||''].map(csvEscape).join(','));
+    lines.push([i+1,p.originalPlayNum??'',p.quarter,hudlOdk(p),p.formation,p.formationStrength,p.backLocation,p.backLocationStart,p.backLocationEnd,p.hBackSlice,p.runToFullback,p.runnerType,p.play,p.down,p.distance,p.gain,p.playType,p.hash,p.direction,p.tostrength,p.toBoundary,p.toTE,p.toFB,p.gap,p.passZone,p.motion,p.motionDirection,p.motionBy,p.motionToStrength,p.motionToBoundary,p.front,p.coverage,p.stunt,p.stuntCall,p.foulBy,p.foulType,p.penaltyResult,p.spotOfFoul,p.kickingTeam,p.returningTeam,p.clock,p.yardLine,p.player,p.passer,p.receiver,p.tackler,p.result,p.isTD?'Y':'',p.isTurnover?'Y':'',p.isSafety?'Y':'',p.notes||'',p.odk,p.pendingReceiver||'',p.drivingSide||''].map(csvEscape).join(','));
   });
   return lines.join('\n');
 }
@@ -5710,7 +5788,7 @@ function importCSV(inputEl){
       return {
         // InternalODK preserves 'PAT' distinctly from the Hudl-mapped 'K' in ODK; fall back to ODK for older exports.
         odk: get(c,'InternalODK') || get(c,'ODK') || '',
-        formation: get(c,'Formation'), formationStrength: get(c,'FormationStrength'), backLocation: get(c,'BackLocation'), backLocationStart: get(c,'BackLocationStart'), backLocationEnd: get(c,'BackLocationEnd'), hBackSlice: get(c,'HBackSlice'), runToFullback: get(c,'RunToFullback'), runnerType: get(c,'RunnerType'), play: get(c,'Play'),
+        formation: get(c,'Formation'), formationStrength: get(c,'FormationStrength'), backLocation: get(c,'BackLocation'), backLocationStart: get(c,'BackLocationStart'), backLocationEnd: get(c,'BackLocationEnd'), hBackSlice: get(c,'HBackSlice'), runToFullback: get(c,'RunToFullback'), runnerType: get(c,'RunnerType'), originalPlayNum: get(c,'OriginalPlayNum') ? parseInt(get(c,'OriginalPlayNum')) : undefined, play: get(c,'Play'),
         down: isNaN(down) ? null : down,
         distance: isNaN(distance) ? null : distance,
         gain: gainRaw!=='' ? parseInt(gainRaw) : undefined,
