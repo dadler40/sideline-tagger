@@ -8117,14 +8117,14 @@ function renderCentralScoutTab(){
   </div>
 
   <div class="card">
-    <div class="section-label">Add: To TE Side?</div>
+    <div class="section-label">BACK: ALIGN TO TE SIDE</div>
     <div class="grid">
       ${['Y','N'].map(v=>`<button class="tile small ${p.toTESide===v?'selected':''}" onclick="setCentralField('toTESide','${v}')">${v}</button>`).join('')}
     </div>
   </div>
 
   <div class="card">
-    <div class="section-label">Add: To 2WR Side?</div>
+    <div class="section-label">BACK: TO 2WR SIDE</div>
     <div class="grid">
       ${['Y','N','NA'].map(v=>`<button class="tile small ${p.to2WRSide===v?'selected':''}" onclick="setCentralField('to2WRSide','${v}')">${v}</button>`).join('')}
     </div>
