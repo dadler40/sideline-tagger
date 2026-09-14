@@ -7783,11 +7783,11 @@ function scoutSummaryLine(p){
 function centralNext(){ if(state.centralReviewIndex < state.centralPlays.length-1) state.centralReviewIndex++; render(); }
 function centralPrev(){ if(state.centralReviewIndex > 0) state.centralReviewIndex--; render(); }
 function isCentralPlayFinished(p){
-  if(!p.backAlignment || !p.toTESide || !p.to2WRSide || !p.guardPull || !p.motion) return false;
+  if(!p.backAlignment || !p.toTESide || !p.to2WRSide || !p.guardPull || !p.motion || !p.number9Position || !p.number52SameSideAs9) return false;
   if(p.guardPull === 'Y' && !p.runToPullSide) return false;
   if(p.motion === 'Y' && (!p.motionDirection || !p.motionFieldBoundary)) return false;
   if(p.motion === 'Y' && p.playType === 'Pass' && !p.passToMotionSide) return false;
-  if(p.playType === 'Run' && (!p.runToNumber9 || !p.runToArentz)) return false;
+  if(p.playType === 'Run' && (!p.runToNumber9 || !p.number9BallCarrier || !p.runToArentz)) return false;
   return true;
 }
 function centralJumpToNextUnfinished(){
@@ -7816,10 +7816,10 @@ function setCentralField(field, value){
   render();
 }
 function buildCentralCSVString(){
-  const headers = ['PlayNum','OriginalPlayNum','Quarter','Formation','FormationStrength','BackAlignment','ToTESide','To2WRSide','GuardPull','RunToPullSide','Motion','MotionDirection','MotionFieldBoundary','PassToMotionSide','RunToNumber9','RunToArentz','Play','Down','Distance','Gain','PlayType','Hash','Direction','Gap','PassZone','YardLine','Notes'];
+  const headers = ['PlayNum','OriginalPlayNum','Quarter','Formation','FormationStrength','BackAlignment','ToTESide','To2WRSide','GuardPull','RunToPullSide','Motion','MotionDirection','MotionFieldBoundary','PassToMotionSide','Number9Position','Number52SameSideAs9','RunToNumber9','Number9BallCarrier','RunToArentz','Play','Down','Distance','Gain','PlayType','Hash','Direction','Gap','PassZone','YardLine','Notes'];
   const lines = [headers.join(',')];
   state.centralPlays.forEach((p,i)=>{
-    lines.push([i+1,p.originalPlayNum??'',p.quarter,p.formation,p.formationStrength,p.backAlignment,p.toTESide,p.to2WRSide,p.guardPull,p.runToPullSide,p.motion,p.motionDirection,p.motionFieldBoundary,p.passToMotionSide,p.runToNumber9,p.runToArentz,p.play,p.down,p.distance,p.gain,p.playType,p.hash,p.direction,p.gap,p.passZone,p.yardLine,p.notes||''].map(csvEscape).join(','));
+    lines.push([i+1,p.originalPlayNum??'',p.quarter,p.formation,p.formationStrength,p.backAlignment,p.toTESide,p.to2WRSide,p.guardPull,p.runToPullSide,p.motion,p.motionDirection,p.motionFieldBoundary,p.passToMotionSide,p.number9Position,p.number52SameSideAs9,p.runToNumber9,p.number9BallCarrier,p.runToArentz,p.play,p.down,p.distance,p.gain,p.playType,p.hash,p.direction,p.gap,p.passZone,p.yardLine,p.notes||''].map(csvEscape).join(','));
   });
   return lines.join('\n');
 }
@@ -8072,6 +8072,7 @@ function renderCentralScoutTab(){
   state.centralPlays.forEach(pl => {
     if(pl.playType !== 'Run' && !pl.runToNumber9) pl.runToNumber9 = 'N/A';
     if(pl.playType !== 'Run' && !pl.runToArentz) pl.runToArentz = 'N/A';
+    if(pl.playType !== 'Run' && !pl.number9BallCarrier) pl.number9BallCarrier = 'N/A';
   });
 
   const total = state.centralPlays.length;
@@ -8161,7 +8162,7 @@ function renderCentralScoutTab(){
   <div class="card">
     <div class="section-label">Motion Field/Boundary</div>
     <div class="grid">
-      ${['Field','Boundary'].map(v=>`<button class="tile small ${p.motionFieldBoundary===v?'selected':''}" onclick="setCentralField('motionFieldBoundary','${v}')">${v}</button>`).join('')}
+      ${['Field','Boundary','Middle'].map(v=>`<button class="tile small ${p.motionFieldBoundary===v?'selected':''}" onclick="setCentralField('motionFieldBoundary','${v}')">${v}</button>`).join('')}
     </div>
   </div>
   ${p.playType === 'Pass' ? `
@@ -8174,11 +8175,31 @@ function renderCentralScoutTab(){
   ` : ''}
   ` : ''}
 
+  <div class="card">
+    <div class="section-label">Add: #9 Position</div>
+    <div class="grid">
+      ${['Outside TE','Inside TE'].map(v=>`<button class="tile small ${p.number9Position===v?'selected':''}" onclick="setCentralField('number9Position','${v}')">${v}</button>`).join('')}
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="section-label">Add: 52 On Same Side As 9 Pre-Snap?</div>
+    <div class="grid">
+      ${['Y','N'].map(v=>`<button class="tile small ${p.number52SameSideAs9===v?'selected':''}" onclick="setCentralField('number52SameSideAs9','${v}')">${v}</button>`).join('')}
+    </div>
+  </div>
+
   ${p.playType === 'Run' ? `
   <div class="card">
     <div class="section-label">Add: Run to #9?</div>
     <div class="grid">
       ${['Y','N'].map(v=>`<button class="tile small ${p.runToNumber9===v?'selected':''}" onclick="setCentralField('runToNumber9','${v}')">${v}</button>`).join('')}
+    </div>
+  </div>
+  <div class="card">
+    <div class="section-label">Add: #9 Is Ball Carrier?</div>
+    <div class="grid">
+      ${['Y','N'].map(v=>`<button class="tile small ${p.number9BallCarrier===v?'selected':''}" onclick="setCentralField('number9BallCarrier','${v}')">${v}</button>`).join('')}
     </div>
   </div>
   <div class="card">
@@ -8189,7 +8210,7 @@ function renderCentralScoutTab(){
   </div>
   ` : `
   <div class="card">
-    <div class="section-label">Run to #9? / Run to Arentz (#52 - G)?</div>
+    <div class="section-label">Run to #9? / #9 Is Ball Carrier? / Run to Arentz (#52 - G)?</div>
     <div class="hint" style="margin-top:0;">N/A — not a run play.</div>
   </div>
   `}
